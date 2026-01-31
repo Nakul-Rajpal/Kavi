@@ -1,4 +1,37 @@
-# Hugging Face auth – if login fails
+# Hugging Face auth and model download
+
+## If the model download is very slow or stuck
+
+The SAM3 model is **~3.44 GB** (`model.safetensors`). At 25–100 KB/s it can take many hours.
+
+**Cache path (to check progress):**
+```text
+~/.cache/huggingface/hub/
+```
+Example on your Mac: `/Users/nakulrajpal/.cache/huggingface/hub/models--facebook--sam3/`
+
+**Options:**
+
+1. **Faster download (recommended):** Install the Rust-based downloader, then run your script again:
+   ```bash
+   python3.11 -m pip install hf-transfer
+   export HF_HUB_ENABLE_HF_TRANSFER=1
+   ./run_dji_live_rtmp.sh
+   ```
+   The script now enables this automatically if `hf-transfer` is installed.
+
+2. **Faster network:** Use Ethernet or a different Wi‑Fi; avoid VPN if it slows the connection.
+
+3. **Let it run:** Start the script and leave it running (e.g. overnight). Don’t press Ctrl+C; the download will resume next time only if the cache is left intact (some versions do not resume partial downloads).
+
+4. **After Ctrl+C:** If you cancelled mid-download, run again; the hub may resume or restart. If it keeps failing, remove the incomplete cache and retry:
+   ```bash
+   rm -rf ~/.cache/huggingface/hub/models--facebook--sam3
+   ```
+
+---
+
+## If login fails
 
 If `login()` or the Read token doesn’t work, try these in order.
 

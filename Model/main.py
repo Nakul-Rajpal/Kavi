@@ -7,10 +7,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from sam3_model import SAM3Model
-from pothole_detector import PotholeDetectionPipeline
-from results_reporter import ResultsReporter, LocalFileReporter, MultiReporter
-from config import PipelineConfig
+from .sam3_model import SAM3Model
+from .pothole_detector import PotholeDetectionPipeline
+from .results_reporter import ResultsReporter, LocalFileReporter, MultiReporter
+from .config import PipelineConfig
 
 
 def process_video_file(

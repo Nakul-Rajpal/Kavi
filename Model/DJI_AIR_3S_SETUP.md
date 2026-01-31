@@ -40,13 +40,22 @@ Example result: `192.168.1.100`. Use this in the next step.
 ### Step 3: Set the stream URL in DJI Fly
 
 1. Power on **Air 3S** and **remote controller**; open **DJI Fly** (on RC 2 screen or on your phone with RC-N3).
-2. Go to **GO FLY** → **Transmission** (or **Live Streaming**).
-3. Choose **RTMP**.
-4. Enter this URL (replace `YOUR_PC_IP` with the IP from Step 2):
+2. Go to **GO FLY** → **Transmission** → **Live Streaming Platforms** → **RTMP**.
+3. Enter the RTMP address (replace `YOUR_PC_IP` with your Mac’s IP from Step 2):
+
+   **If the app has ONE field (“RTMP Address”):**  
+   Enter the full URL in that single field:
    ```text
    rtmp://YOUR_PC_IP:1935/stream/dji
    ```
    Example: `rtmp://192.168.1.100:1935/stream/dji`
+
+   **If the app has TWO fields (RTMP address + Stream key):**
+   - **RTMP address:** `rtmp://YOUR_PC_IP:1935/stream`  
+     Example: `rtmp://192.168.1.100:1935/stream`
+   - **Stream key:** `dji`
+
+4. No space or slash at the end. Use the **exact** IP (e.g. from `ipconfig getifaddr en0`).
 5. **Start** the stream in the app. Leave it running.
 
 ### Step 4: Run Kavi on the live feed
@@ -175,6 +184,20 @@ For **GPS/altitude** with detections:
 | 2 | Get PC IP: `ipconfig getifaddr en0`; RC/phone and PC on same Wi‑Fi. |
 | 3 | DJI Fly: Transmission → RTMP → `rtmp://YOUR_PC_IP:1935/stream/dji` → Start stream. |
 | 4 | Run: `python3.11 main.py "rtmp://localhost:1935/stream/dji" --live` |
+
+---
+
+### If DJI Fly says "Check RTMP address or stream key"
+
+- **Two separate fields (Address + Stream key):**  
+  - RTMP address: `rtmp://YOUR_MAC_IP:1935/stream`  
+  - Stream key: `dji`
+- **Single "RTMP Address" field:**  
+  Use: `rtmp://YOUR_MAC_IP:1935/stream/dji` (no space or slash at the end).
+- **Same Wi‑Fi:** Phone/RC and Mac on the same network; get Mac IP with `ipconfig getifaddr en0`.
+- **Server running:** On Mac run `docker ps`; if `kavi-rtmp` is not listed, run `docker start kavi-rtmp` or start it with `docker run -d -p 1935:1935 --name kavi-rtmp alfg/nginx-rtmp`.
+- **Firewall:** Allow incoming connections on port **1935** (Mac System Settings → Network → Firewall).
+- **Typo:** Re-type the IP; do not add a trailing slash or space.
 
 ---
 

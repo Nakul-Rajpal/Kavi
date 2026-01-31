@@ -19,9 +19,15 @@ class SAM3Model:
 
         Args:
             model_id: Hugging Face model ID (facebook/sam3-large, facebook/sam3-base, etc.)
-            device: Device to run model on ('cuda' or 'cpu')
+            device: Preferred device ('cuda', 'mps', or 'cpu'). Auto-picks MPS on Apple Silicon.
         """
-        self.device = device if torch.cuda.is_available() else "cpu"
+        # Prefer CUDA, then MPS (Apple Silicon), then CPU
+        if device == "cuda" and torch.cuda.is_available():
+            self.device = "cuda"
+        elif torch.backends.mps.is_available():
+            self.device = "mps"  # Apple M1/M2/M3 GPU (Metal)
+        else:
+            self.device = "cpu"
         self.model_id = model_id
         self.model = None
         self.processor = None
@@ -35,6 +41,9 @@ class SAM3Model:
             from transformers import Sam3Model as HFSam3Model, Sam3Processor
 
             print("Loading SAM3 from Hugging Face...")
+            print("  First run downloads ~3.4GB (model.safetensors). This can take 10–30+ min.")
+            print("  To see progress: check ~/.cache/huggingface/hub/ for growing files.")
+            print("  For faster download: pip install hf_transfer && set HF_HUB_ENABLE_HF_TRANSFER=1")
 
             # Load processor and model (official API: .to(device), not device_map)
             self.processor = Sam3Processor.from_pretrained(self.model_id)

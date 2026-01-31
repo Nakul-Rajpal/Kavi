@@ -4,7 +4,13 @@
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Faster Hugging Face download (optional: pip install hf-transfer)
+if python3.11 -c "import hf_transfer" 2>/dev/null; then
+  export HF_HUB_ENABLE_HF_TRANSFER=1
+fi
 
 RTMP_IMAGE="alfg/nginx-rtmp"
 RTMP_CONTAINER="kavi-rtmp"
@@ -21,7 +27,7 @@ if ! command -v docker &>/dev/null; then
   echo "Docker is not installed or not in PATH."
   echo "Install Docker Desktop from https://www.docker.com/products/docker-desktop/"
   echo "Or start an RTMP server manually and run:"
-  echo "  python3.11 main.py \"${STREAM_URL_LOCAL}\" --live $*"
+  echo "  python3.11 -m Model.main \"${STREAM_URL_LOCAL}\" --live $*"
   exit 1
 fi
 
@@ -69,4 +75,4 @@ echo "Stream URL: ${STREAM_URL_LOCAL}"
 echo "Press Ctrl+C to stop."
 echo ""
 
-exec python3.11 main.py "$STREAM_URL_LOCAL" --live "$@"
+exec python3.11 -m Model.main "$STREAM_URL_LOCAL" --live "$@"
