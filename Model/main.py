@@ -15,7 +15,7 @@ from config import PipelineConfig
 
 def process_video_file(
     video_path: str,
-    model_id: str = "facebook/sam3-large",
+    model_id: str = "facebook/sam3",
     telemetry_file: str = None,
     output_dir: str = "./results",
     api_endpoint: str = None,
@@ -128,7 +128,7 @@ def process_video_file(
 
 def process_live_stream(
     video_source: str,
-    model_id: str = "facebook/sam3-large",
+    model_id: str = "facebook/sam3",
     output_dir: str = "./results",
     api_endpoint: str = None,
     api_key: str = None,
@@ -239,14 +239,14 @@ def main():
     parser.add_argument(
         'video_source',
         type=str,
-        help='Path to video file or camera index (0 for webcam)'
+        help='Video file path, camera index (e.g. 0), or live stream URL (rtsp://... or rtmp://... for DJI Air 3S etc.)'
     )
 
     parser.add_argument(
         '--model',
         type=str,
-        default='facebook/sam3-large',
-        help='Hugging Face model ID (default: facebook/sam3-large)'
+        default='facebook/sam3',
+        help='Hugging Face model ID (default: facebook/sam3)'
     )
 
     parser.add_argument(
@@ -294,16 +294,17 @@ def main():
     parser.add_argument(
         '--live',
         action='store_true',
-        help='Process live video stream'
+        help='Process live video stream (camera index or RTSP/RTMP URL). See DJI_AIR_3S_SETUP.md for DJI drone setup.'
     )
 
     args = parser.parse_args()
 
-    # Validate inputs
+    # Validate inputs: for file mode, source must exist; for live mode, allow URL or camera index
     if not args.live:
         if not Path(args.video_source).exists():
             print(f"Error: Video file not found: {args.video_source}")
             sys.exit(1)
+    # For --live: video_source can be camera index ("0") or stream URL (rtsp://... or rtmp://...)
 
     # Run appropriate mode
     if args.live:

@@ -91,7 +91,7 @@ def test_transformers():
 
 
 def test_huggingface_auth():
-    """Test HuggingFace authentication"""
+    """Test HuggingFace authentication (token file or HF_TOKEN env)"""
     print("\n" + "=" * 60)
     print("Testing HuggingFace Authentication...")
     print("=" * 60)
@@ -99,20 +99,25 @@ def test_huggingface_auth():
     import os
     from pathlib import Path
 
+    # Check HF_TOKEN environment variable first
+    if os.environ.get("HF_TOKEN", "").strip().startswith("hf_"):
+        print("✓ HuggingFace token found (HF_TOKEN environment variable)")
+        return True
+
     # Check for token file
     token_path = Path.home() / ".huggingface" / "token"
-
     if token_path.exists():
         print("✓ HuggingFace token found")
         print(f"  Location: {token_path}")
         return True
-    else:
-        print("✗ HuggingFace token NOT found")
-        print("\nTo authenticate:")
-        print("1. Get your token from: https://huggingface.co/settings/tokens")
-        print("2. Run: python3.11 -c \"from huggingface_hub import login; login()\"")
-        print("3. Or set HF_TOKEN environment variable")
-        return False
+
+    print("✗ HuggingFace token NOT found")
+    print("\nTo authenticate:")
+    print("1. Get your token from: https://huggingface.co/settings/tokens (type: Read)")
+    print("2. Run: python3.11 -c \"from huggingface_hub import login; login()\"")
+    print("   Then paste your token when prompted.")
+    print("3. Or in this terminal: export HF_TOKEN=\"hf_your_token_here\"")
+    return False
 
 
 def test_sam3_model_access():
@@ -124,7 +129,7 @@ def test_sam3_model_access():
     try:
         from huggingface_hub import model_info
 
-        model_id = "facebook/sam3-large"
+        model_id = "facebook/sam3"
         print(f"Checking access to: {model_id}")
 
         try:
@@ -137,7 +142,7 @@ def test_sam3_model_access():
             if "401" in error_msg or "403" in error_msg:
                 print(f"✗ Access denied to {model_id}")
                 print("\nTo get access:")
-                print("1. Visit: https://huggingface.co/facebook/sam3-large")
+                print("1. Visit: https://huggingface.co/facebook/sam3")
                 print("2. Click 'Request Access' button")
                 print("3. Wait for approval (usually hours to days)")
                 print("4. Make sure you're logged in (see above)")
@@ -165,7 +170,7 @@ def test_sam3_model_load():
         print("(This may take a few minutes on first run to download ~3GB)")
 
         model = SAM3Model(
-            model_id="facebook/sam3-large",
+            model_id="facebook/sam3",
             device="cpu"  # Use CPU for testing
         )
 
@@ -237,7 +242,7 @@ def main():
         print("\nFollow the instructions above to fix failed tests.")
         print("Most common issues:")
         print("1. Need to authenticate: python3.11 -c \"from huggingface_hub import login; login()\"")
-        print("2. Need to request SAM3 access: https://huggingface.co/facebook/sam3-large")
+        print("2. Need to request SAM3 access: https://huggingface.co/facebook/sam3")
     print("=" * 60)
 
     return 0 if all_passed else 1

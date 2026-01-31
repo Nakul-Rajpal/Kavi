@@ -1,8 +1,10 @@
 """
 Video Processing Pipeline for Drone Footage
-Handles video frame extraction and processing
+Handles video frame extraction and processing.
+Supports files, camera index, and live stream URLs (RTSP/RTMP) for DJI and other drones.
 """
 
+import os
 import cv2
 import numpy as np
 from typing import Generator, Tuple, Optional, Dict
@@ -11,15 +13,33 @@ import threading
 import queue
 
 
+def _is_stream_url(source: str) -> bool:
+    """Return True if source is an RTSP or RTMP stream URL."""
+    s = (source or "").strip().lower()
+    return s.startswith("rtsp://") or s.startswith("rtmp://")
+
+
+def _open_stream_capture(source: str):
+    """
+    Open RTSP/RTMP stream with FFmpeg backend and stream-friendly options.
+    Uses TCP for RTSP when possible for more reliable drone feeds (e.g. DJI Air 3S).
+    """
+    # Prefer TCP for RTSP to avoid UDP packet loss on WiFi
+    if source.strip().lower().startswith("rtsp://"):
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+    cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+    return cap
+
+
 class VideoProcessor:
-    """Process video frames from drone footage"""
+    """Process video frames from drone footage (files, camera index, or RTSP/RTMP URLs)"""
 
     def __init__(self, video_source: str, buffer_size: int = 30):
         """
         Initialize video processor
 
         Args:
-            video_source: Path to video file or camera index (0 for webcam)
+            video_source: Path to video file, camera index (e.g. 0), or stream URL (rtsp://... or rtmp://...)
             buffer_size: Size of frame buffer for live processing
         """
         self.video_source = video_source
@@ -27,28 +47,36 @@ class VideoProcessor:
         self.frame_queue = queue.Queue(maxsize=buffer_size)
         self.is_running = False
         self.capture_thread = None
+        self._is_stream = _is_stream_url(str(video_source))
 
     def open_video(self) -> bool:
         """
-        Open video source
+        Open video source (file, camera index, or RTSP/RTMP URL).
 
         Returns:
             True if successful, False otherwise
         """
         try:
-            self.cap = cv2.VideoCapture(self.video_source)
+            if self._is_stream:
+                self.cap = _open_stream_capture(self.video_source)
+            else:
+                self.cap = cv2.VideoCapture(self.video_source)
             if not self.cap.isOpened():
                 print(f"Failed to open video source: {self.video_source}")
                 return False
 
             # Get video properties
-            self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+            self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
             self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-            print(f"Video opened: {self.frame_width}x{self.frame_height} @ {self.fps} FPS")
-            print(f"Total frames: {self.total_frames}")
+            if self._is_stream or self.total_frames <= 0:
+                self.total_frames = 0
+                print(f"Live stream opened: {self.frame_width}x{self.frame_height} @ {self.fps} FPS")
+            else:
+                print(f"Video opened: {self.frame_width}x{self.frame_height} @ {self.fps} FPS")
+                print(f"Total frames: {self.total_frames}")
 
             return True
 

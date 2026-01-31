@@ -13,7 +13,7 @@ from PIL import Image
 class SAM3Model:
     """Wrapper class for SAM3 model operations with concept-based prompts"""
 
-    def __init__(self, model_id: str = "facebook/sam3-large", device: str = "cuda"):
+    def __init__(self, model_id: str = "facebook/sam3", device: str = "cuda"):
         """
         Initialize SAM3 model
 
@@ -36,12 +36,9 @@ class SAM3Model:
 
             print("Loading SAM3 from Hugging Face...")
 
-            # Load processor and model
+            # Load processor and model (official API: .to(device), not device_map)
             self.processor = Sam3Processor.from_pretrained(self.model_id)
-            self.model = HFSam3Model.from_pretrained(
-                self.model_id,
-                device_map=self.device
-            )
+            self.model = HFSam3Model.from_pretrained(self.model_id).to(self.device)
 
             # Set model to eval mode
             self.model.eval()
@@ -56,7 +53,7 @@ class SAM3Model:
             print(f"  {e}")
             print("\nTo install SAM3:")
             print("  1. Install transformers: pip install transformers>=4.47.0")
-            print("  2. Request access: https://huggingface.co/facebook/sam3-large")
+            print("  2. Request access: https://huggingface.co/facebook/sam3")
             print("  3. Authenticate: huggingface-cli login")
             return False
 
@@ -97,45 +94,60 @@ class SAM3Model:
         if isinstance(text_prompts, str):
             text_prompts = [text_prompts]
 
-        # Process inputs
+        # Process inputs (processor adds original_sizes for post-processing)
         inputs = self.processor(
             images=image,
-            text=text_prompts,
+            text=text_prompts[0] if len(text_prompts) == 1 else text_prompts,
             return_tensors="pt"
-        ).to(self.device)
+        )
+        # Move to device; keep original_sizes for post_process, don't pass to model
+        target_sizes_raw = inputs.pop("original_sizes", None)
+        inputs = {k: v.to(self.device) if hasattr(v, 'to') else v for k, v in inputs.items()}
 
         # Run inference
         with torch.no_grad():
             outputs = self.model(**inputs)
 
-        # Post-process results
-        results = self.processor.post_process_object_detection(
+        # Post-process (official API: post_process_instance_segmentation)
+        target_sizes = target_sizes_raw
+        if target_sizes is not None and hasattr(target_sizes, "tolist"):
+            target_sizes = target_sizes.tolist()
+        if not target_sizes:
+            target_sizes = [[image.height, image.width]]
+        results = self.processor.post_process_instance_segmentation(
             outputs,
             threshold=threshold,
-            target_sizes=[image.size[::-1]]  # (height, width)
+            mask_threshold=0.5,
+            target_sizes=target_sizes
         )[0]
 
-        # Convert to our format
+        # Convert to our format (results: masks, boxes, scores; no labels in API)
         detections = []
-        for i in range(len(results['scores'])):
-            if results['scores'][i] >= threshold:
-                mask = results['masks'][i].cpu().numpy()
-                box = results['boxes'][i].cpu().numpy()  # [x1, y1, x2, y2]
-
-                # Convert box from xyxy to xywh
-                bbox = [
-                    float(box[0]),
-                    float(box[1]),
-                    float(box[2] - box[0]),
-                    float(box[3] - box[1])
-                ]
-
+        scores = results.get("scores", results.get("score", []))
+        masks = results.get("masks", [])
+        boxes = results.get("boxes", [])
+        if not hasattr(scores, "__len__"):
+            scores = [scores]
+        if not hasattr(masks, "__len__"):
+            masks = [masks]
+        if not hasattr(boxes, "__len__"):
+            boxes = [boxes]
+        for i in range(len(scores)):
+            sc = scores[i].item() if hasattr(scores[i], "item") else float(scores[i])
+            if sc >= threshold:
+                mask = masks[i].cpu().numpy() if hasattr(masks[i], "cpu") else np.array(masks[i])
+                box = boxes[i].cpu().numpy() if hasattr(boxes[i], "cpu") else np.array(boxes[i])
+                if box.size >= 4:
+                    x1, y1, x2, y2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+                else:
+                    x1, y1, x2, y2 = 0, 0, 0, 0
+                bbox = [x1, y1, x2 - x1, y2 - y1]
                 detections.append({
                     'mask': mask,
-                    'bbox': bbox,  # [x, y, w, h]
-                    'area': float(np.sum(mask)),
-                    'confidence': float(results['scores'][i]),
-                    'label': text_prompts[results['labels'][i]] if results['labels'][i] < len(text_prompts) else text_prompts[0]
+                    'bbox': bbox,
+                    'area': float(np.sum(mask > 0.5)),
+                    'confidence': sc,
+                    'label': text_prompts[0] if text_prompts else "object"
                 })
 
         return detections
