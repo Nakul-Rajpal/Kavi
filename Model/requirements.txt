@@ -1,0 +1,26 @@
+# SAM3 / SAM2 Model
+torch>=2.0.0
+torchvision>=0.15.0
+# Install SAM2 from Meta's repository:
+# pip install git+https://github.com/facebookresearch/segment-anything-2.git
+
+# Computer Vision
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# API and Networking
+requests>=2.31.0
+websocket-client>=1.6.0
+
+# Data Processing
+pandas>=2.0.0
+
+# Utilities
+tqdm>=4.66.0
+python-dateutil>=2.8.2
+
+# Optional: GPU acceleration
+# cupy-cuda11x  # Uncomment for CUDA 11.x
+# cupy-cuda12x  # Uncomment for CUDA 12.x
