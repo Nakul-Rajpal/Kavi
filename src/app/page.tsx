@@ -1,13 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Header from "@/components/Header";
 import GlassPanel from "@/components/GlassPanel";
 import Timeline from "@/components/Timeline";
 import FilterMenu from "@/components/FilterMenu";
 import DetectionsSidebar from "@/components/DetectionsSidebar";
 import { AnimatePresence } from "framer-motion";
+import { Ping } from "@/lib/supabase";
 
 // Dynamically import map to avoid SSR issues with Leaflet
 const Map = dynamic(() => import("@/components/Map"), { 
@@ -16,7 +17,7 @@ const Map = dynamic(() => import("@/components/Map"), {
     <div className="w-full h-full bg-[#0d1117] flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <div className="w-10 h-10 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin" />
-        <p className="text-cyan-500/70 font-bold tracking-widest text-xs uppercase">Loading Map...</p>
+        <p className="text-cyan-500/70 font-bold tracking-widest text-xs uppercase">Connecting to Database...</p>
       </div>
     </div>
   )
@@ -26,12 +27,25 @@ export default function Dashboard() {
   const [isLive, setIsLive] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
   const [currentTime, setCurrentTime] = useState("12:00 PM");
+  const [pings, setPings] = useState<Ping[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+
+  const handlePingsUpdate = useCallback((data: { count: number; latest: Ping | null; pings: Ping[] }) => {
+    setPings(data.pings);
+    if (data.pings.length > 0) {
+      setConnectionStatus('connected');
+    }
+  }, []);
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[#0d1117]">
       {/* Map Layer */}
       <div className="absolute inset-0 z-0">
-        <Map isLive={isLive} currentTime={currentTime} />
+        <Map 
+          isLive={isLive} 
+          currentTime={currentTime} 
+          onPingsUpdate={handlePingsUpdate}
+        />
       </div>
 
       {/* UI Overlays */}
@@ -43,8 +57,8 @@ export default function Dashboard() {
           setShowTimeline={setShowTimeline}
         />
 
-        {/* Detections Sidebar */}
-        <DetectionsSidebar />
+        {/* Detections Sidebar - now with real data */}
+        <DetectionsSidebar pings={pings} connectionStatus={connectionStatus} />
 
         <AnimatePresence>
           {isLive && (
