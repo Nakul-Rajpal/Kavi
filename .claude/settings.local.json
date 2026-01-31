@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python download_checkpoint.py:*)",
+      "Bash(python3:*)",
+      "Bash(curl:*)",
+      "Bash(ls:*)",
+      "WebFetch(domain:ai.meta.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(pip install:*)",
+      "Bash(pip --version:*)",
+      "Bash(python3.11 -m pip install:*)",
+      "Bash(python3.11 -m huggingface_hub.commands.huggingface_cli whoami:*)",
+      "Bash(huggingface-cli whoami:*)",
+      "Bash(python3.11:*)",
+      "Bash(chmod:*)"
+    ]
+  }
+}

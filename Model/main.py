@@ -15,7 +15,7 @@ from config import PipelineConfig
 
 def process_video_file(
     video_path: str,
-    checkpoint_path: str,
+    model_id: str = "facebook/sam3-large",
     telemetry_file: str = None,
     output_dir: str = "./results",
     api_endpoint: str = None,
@@ -28,7 +28,7 @@ def process_video_file(
 
     Args:
         video_path: Path to video file
-        checkpoint_path: Path to SAM3 checkpoint
+        model_id: Hugging Face model ID (e.g., facebook/sam3-large)
         telemetry_file: Path to telemetry data file
         output_dir: Output directory for results
         api_endpoint: API endpoint for results
@@ -37,14 +37,13 @@ def process_video_file(
         process_every_n: Process every Nth frame
     """
     print("=" * 60)
-    print("Kavi Pothole Detection System")
+    print("Kavi Pothole Detection System with SAM3")
     print("=" * 60)
 
     # Initialize SAM3 model
     print("\n1. Loading SAM3 model...")
     sam_model = SAM3Model(
-        model_type="vit_h",
-        checkpoint_path=checkpoint_path,
+        model_id=model_id,
         device="cuda"
     )
 
@@ -129,7 +128,7 @@ def process_video_file(
 
 def process_live_stream(
     video_source: str,
-    checkpoint_path: str,
+    model_id: str = "facebook/sam3-large",
     output_dir: str = "./results",
     api_endpoint: str = None,
     api_key: str = None,
@@ -141,7 +140,7 @@ def process_live_stream(
 
     Args:
         video_source: Camera index or stream URL
-        checkpoint_path: Path to SAM3 checkpoint
+        model_id: Hugging Face model ID (e.g., facebook/sam3-large)
         output_dir: Output directory for results
         api_endpoint: API endpoint for results
         api_key: API authentication key
@@ -149,14 +148,13 @@ def process_live_stream(
         process_every_n: Process every Nth frame
     """
     print("=" * 60)
-    print("Kavi Pothole Detection System - Live Stream")
+    print("Kavi Pothole Detection System - Live Stream with SAM3")
     print("=" * 60)
 
     # Initialize SAM3 model
     print("\n1. Loading SAM3 model...")
     sam_model = SAM3Model(
-        model_type="vit_h",
-        checkpoint_path=checkpoint_path,
+        model_id=model_id,
         device="cuda"
     )
 
@@ -245,10 +243,10 @@ def main():
     )
 
     parser.add_argument(
-        '--checkpoint',
+        '--model',
         type=str,
-        required=True,
-        help='Path to SAM3 checkpoint file'
+        default='facebook/sam3-large',
+        help='Hugging Face model ID (default: facebook/sam3-large)'
     )
 
     parser.add_argument(
@@ -307,15 +305,11 @@ def main():
             print(f"Error: Video file not found: {args.video_source}")
             sys.exit(1)
 
-    if not Path(args.checkpoint).exists():
-        print(f"Error: Checkpoint file not found: {args.checkpoint}")
-        sys.exit(1)
-
     # Run appropriate mode
     if args.live:
         process_live_stream(
             video_source=args.video_source,
-            checkpoint_path=args.checkpoint,
+            model_id=args.model,
             output_dir=args.output,
             api_endpoint=args.api_endpoint,
             api_key=args.api_key,
@@ -325,7 +319,7 @@ def main():
     else:
         process_video_file(
             video_path=args.video_source,
-            checkpoint_path=args.checkpoint,
+            model_id=args.model,
             telemetry_file=args.telemetry,
             output_dir=args.output,
             api_endpoint=args.api_endpoint,

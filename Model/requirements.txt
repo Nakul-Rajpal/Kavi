@@ -1,14 +1,18 @@
-# SAM3 / SAM2 Model
-torch>=2.0.0
-torchvision>=0.15.0
-# Install SAM2 from Meta's repository:
-# pip install git+https://github.com/facebookresearch/segment-anything-2.git
+# SAM3 (Segment Anything Model 3) - November 2025
+# Install SAM3 from Hugging Face (requires access approval)
+transformers>=4.47.0
+huggingface-hub>=0.20.0
+pillow>=10.0.0
+
+# PyTorch (adjust for your CUDA version)
+torch>=2.1.0
+torchvision>=0.16.0
+# For CUDA 12.1+: Install with --index-url https://download.pytorch.org/whl/cu121
 
 # Computer Vision
 opencv-python>=4.8.0
 opencv-contrib-python>=4.8.0
 numpy>=1.24.0
-Pillow>=10.0.0
 
 # API and Networking
 requests>=2.31.0
@@ -21,6 +25,6 @@ pandas>=2.0.0
 tqdm>=4.66.0
 python-dateutil>=2.8.2
 
-# Optional: GPU acceleration
-# cupy-cuda11x  # Uncomment for CUDA 11.x
-# cupy-cuda12x  # Uncomment for CUDA 12.x
+# Optional: For development
+# accelerate>=0.25.0  # For faster loading with device_map
+# bitsandbytes>=0.41.0  # For quantization (reduce memory)

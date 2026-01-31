@@ -1,143 +1,199 @@
 """
 SAM3 Model Wrapper for Pothole Detection
-Handles loading and inference with the Segment Anything Model 3
+Handles loading and inference with the Segment Anything Model 3 (November 2025)
 """
 
 import torch
 import numpy as np
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Union
 import cv2
+from PIL import Image
 
 
 class SAM3Model:
-    """Wrapper class for SAM3 model operations"""
+    """Wrapper class for SAM3 model operations with concept-based prompts"""
 
-    def __init__(self, model_type: str = "vit_h", checkpoint_path: Optional[str] = None, device: str = "cuda"):
+    def __init__(self, model_id: str = "facebook/sam3-large", device: str = "cuda"):
         """
         Initialize SAM3 model
 
         Args:
-            model_type: Model architecture type (vit_h, vit_l, vit_b)
-            checkpoint_path: Path to SAM3 checkpoint file
+            model_id: Hugging Face model ID (facebook/sam3-large, facebook/sam3-base, etc.)
             device: Device to run model on ('cuda' or 'cpu')
         """
         self.device = device if torch.cuda.is_available() else "cpu"
-        self.model_type = model_type
-        self.checkpoint_path = checkpoint_path
+        self.model_id = model_id
         self.model = None
-        self.predictor = None
+        self.processor = None
 
         print(f"Initializing SAM3 on device: {self.device}")
+        print(f"Model: {self.model_id}")
 
     def load_model(self):
-        """Load SAM3 model and predictor"""
+        """Load SAM3 model and processor from Hugging Face"""
         try:
-            from sam2.build_sam import build_sam2
-            from sam2.sam2_image_predictor import SAM2ImagePredictor
+            from transformers import Sam3Model as HFSam3Model, Sam3Processor
 
-            # Build SAM3 model
-            self.model = build_sam2(
-                config_file=f"sam2_hiera_{self.model_type}.yaml",
-                ckpt_path=self.checkpoint_path,
-                device=self.device
+            print("Loading SAM3 from Hugging Face...")
+
+            # Load processor and model
+            self.processor = Sam3Processor.from_pretrained(self.model_id)
+            self.model = HFSam3Model.from_pretrained(
+                self.model_id,
+                device_map=self.device
             )
 
-            # Initialize predictor
-            self.predictor = SAM2ImagePredictor(self.model)
-            print("SAM3 model loaded successfully")
+            # Set model to eval mode
+            self.model.eval()
+
+            print(f"✓ SAM3 model loaded successfully")
+            print(f"  Model: {self.model_id}")
+            print(f"  Device: {self.device}")
             return True
 
-        except Exception as e:
-            print(f"Error loading SAM3 model: {e}")
-            print("Note: Make sure to install SAM2 package and download checkpoints")
+        except ImportError as e:
+            print(f"✗ Error: SAM3 dependencies not installed")
+            print(f"  {e}")
+            print("\nTo install SAM3:")
+            print("  1. Install transformers: pip install transformers>=4.47.0")
+            print("  2. Request access: https://huggingface.co/facebook/sam3-large")
+            print("  3. Authenticate: huggingface-cli login")
             return False
 
-    def set_image(self, image: np.ndarray):
-        """
-        Set image for segmentation
-
-        Args:
-            image: Input image as numpy array (RGB format)
-        """
-        if self.predictor is None:
-            raise RuntimeError("Model not loaded. Call load_model() first.")
-
-        self.predictor.set_image(image)
-
-    def predict_masks(
-        self,
-        point_coords: Optional[np.ndarray] = None,
-        point_labels: Optional[np.ndarray] = None,
-        box: Optional[np.ndarray] = None,
-        mask_input: Optional[np.ndarray] = None,
-        multimask_output: bool = True
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Generate segmentation masks
-
-        Args:
-            point_coords: Nx2 array of point prompts
-            point_labels: N array of labels (1=foreground, 0=background)
-            box: Bounding box in xyxy format
-            mask_input: Low-res mask from previous prediction
-            multimask_output: Whether to return multiple masks
-
-        Returns:
-            Tuple of (masks, scores, logits)
-        """
-        if self.predictor is None:
-            raise RuntimeError("Model not loaded. Call load_model() first.")
-
-        masks, scores, logits = self.predictor.predict(
-            point_coords=point_coords,
-            point_labels=point_labels,
-            box=box,
-            mask_input=mask_input,
-            multimask_output=multimask_output
-        )
-
-        return masks, scores, logits
-
-    def segment_everything(self, image: np.ndarray) -> List[Dict]:
-        """
-        Perform automatic mask generation on entire image
-
-        Args:
-            image: Input image as numpy array (RGB format)
-
-        Returns:
-            List of segmentation results with masks and metadata
-        """
-        try:
-            from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
-
-            # Initialize automatic mask generator
-            mask_generator = SAM2AutomaticMaskGenerator(
-                model=self.model,
-                points_per_side=32,
-                pred_iou_thresh=0.86,
-                stability_score_thresh=0.92,
-                crop_n_layers=1,
-                crop_n_points_downscale_factor=2,
-                min_mask_region_area=100
-            )
-
-            # Generate masks
-            masks = mask_generator.generate(image)
-            return masks
-
         except Exception as e:
-            print(f"Error in automatic segmentation: {e}")
-            return []
+            print(f"✗ Error loading SAM3 model: {e}")
+            print("\nTroubleshooting:")
+            print("  - Ensure you have access approved on Hugging Face")
+            print("  - Authenticate: huggingface-cli login")
+            print("  - Check model ID:", self.model_id)
+            return False
 
-    def reset(self):
-        """Reset predictor state"""
-        if self.predictor:
-            self.predictor.reset_image()
+    def detect_with_text(
+        self,
+        image: Union[np.ndarray, Image.Image],
+        text_prompts: Union[str, List[str]],
+        threshold: float = 0.5
+    ) -> List[Dict]:
+        """
+        Detect objects using text prompts (SAM3's main feature!)
+
+        Args:
+            image: Input image (RGB numpy array or PIL Image)
+            text_prompts: Text description(s) of what to detect
+                         e.g., "pothole", ["pothole", "road damage", "asphalt crack"]
+            threshold: Confidence threshold for detection
+
+        Returns:
+            List of detection results with masks, boxes, and scores
+        """
+        if self.model is None or self.processor is None:
+            raise RuntimeError("Model not loaded. Call load_model() first.")
+
+        # Convert numpy to PIL if needed
+        if isinstance(image, np.ndarray):
+            image = Image.fromarray(image)
+
+        # Ensure text_prompts is a list
+        if isinstance(text_prompts, str):
+            text_prompts = [text_prompts]
+
+        # Process inputs
+        inputs = self.processor(
+            images=image,
+            text=text_prompts,
+            return_tensors="pt"
+        ).to(self.device)
+
+        # Run inference
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        # Post-process results
+        results = self.processor.post_process_object_detection(
+            outputs,
+            threshold=threshold,
+            target_sizes=[image.size[::-1]]  # (height, width)
+        )[0]
+
+        # Convert to our format
+        detections = []
+        for i in range(len(results['scores'])):
+            if results['scores'][i] >= threshold:
+                mask = results['masks'][i].cpu().numpy()
+                box = results['boxes'][i].cpu().numpy()  # [x1, y1, x2, y2]
+
+                # Convert box from xyxy to xywh
+                bbox = [
+                    float(box[0]),
+                    float(box[1]),
+                    float(box[2] - box[0]),
+                    float(box[3] - box[1])
+                ]
+
+                detections.append({
+                    'mask': mask,
+                    'bbox': bbox,  # [x, y, w, h]
+                    'area': float(np.sum(mask)),
+                    'confidence': float(results['scores'][i]),
+                    'label': text_prompts[results['labels'][i]] if results['labels'][i] < len(text_prompts) else text_prompts[0]
+                })
+
+        return detections
+
+    def segment_with_points(
+        self,
+        image: Union[np.ndarray, Image.Image],
+        point_coords: List[List[float]],
+        point_labels: Optional[List[int]] = None
+    ) -> Dict:
+        """
+        Segment using point prompts
+
+        Args:
+            image: Input image
+            point_coords: List of [x, y] coordinates
+            point_labels: List of labels (1=foreground, 0=background)
+
+        Returns:
+            Segmentation result with mask
+        """
+        if self.model is None or self.processor is None:
+            raise RuntimeError("Model not loaded. Call load_model() first.")
+
+        # Convert numpy to PIL if needed
+        if isinstance(image, np.ndarray):
+            image = Image.fromarray(image)
+
+        # Default all points to foreground if not specified
+        if point_labels is None:
+            point_labels = [1] * len(point_coords)
+
+        # Process inputs
+        inputs = self.processor(
+            images=image,
+            input_points=[point_coords],
+            input_labels=[point_labels],
+            return_tensors="pt"
+        ).to(self.device)
+
+        # Run inference
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        # Get the best mask
+        masks = outputs.pred_masks[0].cpu().numpy()
+        scores = outputs.iou_scores[0].cpu().numpy()
+
+        best_idx = np.argmax(scores)
+
+        return {
+            'mask': masks[best_idx],
+            'confidence': float(scores[best_idx])
+        }
 
 
 class SAM3PotholeDetector:
-    """SAM3-based pothole detector with automatic segmentation"""
+    """SAM3-based pothole detector using concept prompts"""
 
     def __init__(self, sam_model: SAM3Model):
         """
@@ -148,121 +204,135 @@ class SAM3PotholeDetector:
         """
         self.sam_model = sam_model
 
-    def detect_potholes(self, image: np.ndarray, confidence_threshold: float = 0.5) -> List[Dict]:
+        # Define pothole-related prompts
+        self.pothole_prompts = [
+            "pothole",
+            "road damage",
+            "asphalt crack",
+            "pavement hole",
+            "road defect"
+        ]
+
+    def detect_potholes(
+        self,
+        image: np.ndarray,
+        confidence_threshold: float = 0.5,
+        custom_prompts: Optional[List[str]] = None
+    ) -> List[Dict]:
         """
-        Detect potholes in image using SAM3 segmentation
+        Detect potholes in image using SAM3 text prompts
 
         Args:
             image: Input image (RGB format)
             confidence_threshold: Minimum confidence for pothole detection
+            custom_prompts: Optional custom text prompts to use
 
         Returns:
             List of detected potholes with masks and metadata
         """
-        # Generate all segments in the image
-        all_segments = self.sam_model.segment_everything(image)
+        # Use custom prompts if provided, otherwise use defaults
+        prompts = custom_prompts or self.pothole_prompts
 
-        # Filter segments that likely represent potholes
-        pothole_candidates = []
+        # Detect using text prompts - SAM3's superpower!
+        detections = self.sam_model.detect_with_text(
+            image=image,
+            text_prompts=prompts,
+            threshold=confidence_threshold
+        )
 
-        for segment in all_segments:
-            # Extract segment features
-            features = self._extract_segment_features(segment, image)
+        # Enhance detections with additional features
+        enhanced_detections = []
+        for detection in detections:
+            # Extract additional features
+            features = self._extract_segment_features(detection, image)
 
-            # Classify if segment is a pothole
-            is_pothole, confidence = self._classify_pothole(features)
+            # Merge features into detection
+            detection['features'] = features
 
-            if is_pothole and confidence >= confidence_threshold:
-                pothole_candidates.append({
-                    'mask': segment['segmentation'],
-                    'bbox': segment['bbox'],
-                    'area': segment['area'],
-                    'confidence': confidence,
-                    'features': features
-                })
+            # Apply additional filtering if needed
+            if self._is_valid_pothole(detection):
+                enhanced_detections.append(detection)
 
-        return pothole_candidates
+        return enhanced_detections
 
-    def _extract_segment_features(self, segment: Dict, image: np.ndarray) -> Dict:
+    def _extract_segment_features(self, detection: Dict, image: np.ndarray) -> Dict:
         """
-        Extract features from segmented region
+        Extract additional features from detected segment
 
         Args:
-            segment: Segment dictionary from SAM3
+            detection: Detection dictionary with mask
             image: Original image
 
         Returns:
             Dictionary of extracted features
         """
-        mask = segment['segmentation']
-        bbox = segment['bbox']  # [x, y, w, h]
+        mask = detection['mask']
+        bbox = detection['bbox']  # [x, y, w, h]
 
         # Calculate shape features
-        area = segment['area']
         aspect_ratio = bbox[2] / max(bbox[3], 1)
 
         # Extract color features from masked region
-        masked_region = cv2.bitwise_and(image, image, mask=mask.astype(np.uint8))
-        mean_color = cv2.mean(image, mask=mask.astype(np.uint8))[:3]
+        if len(mask.shape) == 2:
+            mask_uint8 = (mask > 0.5).astype(np.uint8) * 255
+        else:
+            mask_uint8 = mask.astype(np.uint8)
+
+        mean_color = cv2.mean(image, mask=mask_uint8)[:3]
 
         # Texture features (simplified)
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        masked_gray = cv2.bitwise_and(gray, gray, mask=mask.astype(np.uint8))
-        texture_variance = np.var(masked_gray[mask > 0]) if np.any(mask) else 0
+        masked_gray = cv2.bitwise_and(gray, gray, mask=mask_uint8)
+        texture_variance = np.var(masked_gray[mask_uint8 > 0]) if np.any(mask_uint8) else 0
 
         return {
-            'area': area,
             'aspect_ratio': aspect_ratio,
             'mean_color': mean_color,
             'texture_variance': texture_variance,
-            'bbox': bbox
+            'brightness': np.mean(mean_color)
         }
 
-    def _classify_pothole(self, features: Dict) -> Tuple[bool, float]:
+    def _is_valid_pothole(self, detection: Dict) -> bool:
         """
-        Classify if features indicate a pothole
+        Additional validation to filter out false positives
 
         Args:
-            features: Extracted features dictionary
+            detection: Detection dictionary
 
         Returns:
-            Tuple of (is_pothole, confidence)
+            True if valid pothole, False otherwise
         """
-        # Heuristic-based classification (can be replaced with ML model)
-        confidence = 0.0
+        # Size filtering (remove very small or very large detections)
+        area = detection['area']
+        if area < 100 or area > 100000:
+            return False
 
-        # Potholes are typically:
-        # 1. Dark colored (low brightness)
-        # 2. Irregular shape (moderate aspect ratio)
-        # 3. Moderate size
-        # 4. High texture variance (rough surface)
+        # Aspect ratio filtering (remove very elongated objects)
+        if 'features' in detection:
+            aspect_ratio = detection['features']['aspect_ratio']
+            if aspect_ratio < 0.2 or aspect_ratio > 5.0:
+                return False
 
-        brightness = np.mean(features['mean_color'])
+        return True
 
-        # Score based on darkness (potholes are usually darker than road)
-        if brightness < 100:
-            confidence += 0.3
-        elif brightness < 150:
-            confidence += 0.15
+    def detect_with_examples(
+        self,
+        image: np.ndarray,
+        example_images: List[np.ndarray],
+        confidence_threshold: float = 0.5
+    ) -> List[Dict]:
+        """
+        Detect potholes using example images (SAM3 image exemplar feature)
 
-        # Score based on size (typical pothole size range)
-        area = features['area']
-        if 500 < area < 50000:
-            confidence += 0.25
-        elif 100 < area < 100000:
-            confidence += 0.1
+        Args:
+            image: Input image to search in
+            example_images: List of example pothole images
+            confidence_threshold: Minimum confidence threshold
 
-        # Score based on aspect ratio (not too elongated)
-        aspect_ratio = features['aspect_ratio']
-        if 0.3 < aspect_ratio < 3.0:
-            confidence += 0.2
-
-        # Score based on texture (rough surface)
-        if features['texture_variance'] > 200:
-            confidence += 0.25
-        elif features['texture_variance'] > 100:
-            confidence += 0.15
-
-        is_pothole = confidence >= 0.5
-
-        return is_pothole, min(confidence, 1.0)
+        Returns:
+            List of detected potholes
+        """
+        # Note: This would require additional implementation with SAM3's
+        # image exemplar feature. For now, fall back to text prompts.
+        print("Image exemplar detection not yet implemented. Using text prompts.")
+        return self.detect_potholes(image, confidence_threshold)

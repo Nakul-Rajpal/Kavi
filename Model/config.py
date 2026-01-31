@@ -9,8 +9,8 @@ import os
 
 @dataclass
 class ModelConfig:
-    """SAM3 Model configuration"""
-    model_type: str = "vit_h"  # vit_h, vit_l, or vit_b
+    """SAM2 Model configuration"""
+    model_type: str = "large"  # large, base_plus, small, or tiny
     checkpoint_path: Optional[str] = None
     device: str = "cuda"  # cuda or cpu
     use_automatic_mask_generation: bool = True
@@ -82,7 +82,7 @@ class PipelineConfig:
         """Create configuration from environment variables"""
         return cls(
             model=ModelConfig(
-                model_type=os.getenv('SAM_MODEL_TYPE', 'vit_h'),
+                model_type=os.getenv('SAM_MODEL_TYPE', 'large'),
                 checkpoint_path=os.getenv('SAM_CHECKPOINT_PATH'),
                 device=os.getenv('SAM_DEVICE', 'cuda')
             ),
