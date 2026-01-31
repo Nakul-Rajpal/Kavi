@@ -1,113 +1,281 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, ZoomControl } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { useEffect, useState, useCallback, useRef } from "react";
+import Map, { Marker, NavigationControl, useMap } from "react-map-gl/maplibre";
+import "maplibre-gl/dist/maplibre-gl.css";
+import { getSupabase, Ping } from "@/lib/supabase";
 
-// SVG icons as strings for Leaflet markers
-const iconsSvg = {
-  pothole: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-  light: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>`,
-  flood: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/></svg>`,
-  debris: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`,
-  sign: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>`,
+// Dark style with 3D buildings and visible labels
+const MAP_STYLE = {
+  version: 8 as const,
+  name: "Dark 3D",
+  sources: {
+    osm: {
+      type: "raster" as const,
+      tiles: [
+        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+      ],
+      tileSize: 256,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+    },
+  },
+  layers: [
+    {
+      id: "osm-tiles",
+      type: "raster" as const,
+      source: "osm",
+      minzoom: 0,
+      maxzoom: 19,
+    },
+  ],
 };
 
-// Create custom marker with glow effect
-const createMarkerIcon = (color: string, iconSvg: string) => {
-  return L.divIcon({
-    className: "custom-marker-icon",
-    html: `
-      <div style="
-        width: 40px;
-        height: 40px;
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      ">
-        <div style="
-          position: absolute;
-          inset: -8px;
-          background: ${color};
-          border-radius: 50%;
-          opacity: 0.3;
-          filter: blur(12px);
-        "></div>
-        <div style="
-          width: 40px;
-          height: 40px;
-          background: rgba(0, 0, 0, 0.8);
-          border: 2px solid ${color};
-          border-radius: 50%;
-          box-shadow: 0 0 25px ${color}80;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: ${color};
-          position: relative;
-          z-index: 1;
-        ">
-          ${iconSvg}
-        </div>
+// Color mapping for severity
+const severityColors: Record<string, string> = {
+  high: "#FF3B30",
+  medium: "#FFD60A",
+  low: "#30D158",
+  default: "#00F3FF",
+};
+
+// Custom marker component
+function CustomMarker({ ping }: { ping: Ping }) {
+  const severity = ping.severity || "default";
+  const color = severityColors[severity] || severityColors.default;
+  const type = ping.type || "default";
+  
+  // Get icon based on type
+  const getIcon = () => {
+    switch (type) {
+      case "pothole":
+        return "⚠️";
+      case "light":
+        return "💡";
+      case "flood":
+        return "💧";
+      case "debris":
+        return "🗑️";
+      case "sign":
+        return "🚧";
+      default:
+        return "📍";
+    }
+  };
+
+  return (
+    <div
+      style={{
+        width: "44px",
+        height: "44px",
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+      }}
+    >
+      {/* Glow effect */}
+      <div
+        style={{
+          position: "absolute",
+          inset: "-8px",
+          background: color,
+          borderRadius: "50%",
+          opacity: 0.3,
+          filter: "blur(12px)",
+        }}
+      />
+      {/* Main marker */}
+      <div
+        style={{
+          width: "44px",
+          height: "44px",
+          background: "rgba(0, 0, 0, 0.85)",
+          border: `2px solid ${color}`,
+          borderRadius: "50%",
+          boxShadow: `0 0 25px ${color}80`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "20px",
+          position: "relative",
+          zIndex: 1,
+        }}
+      >
+        {getIcon()}
       </div>
-    `,
-    iconSize: [40, 40],
-    iconAnchor: [20, 20],
-  });
-};
-
-
-// Detection data with real Providence, RI locations
-const detections = [
-  { id: 1, position: [41.8245, -71.4111] as [number, number], type: "pothole", label: "Pothole", location: "Kennedy Plaza", color: "#FF3B30", confidence: 94 },
-  { id: 2, position: [41.8307, -71.4150] as [number, number], type: "light", label: "Broken Light", location: "Providence Place", color: "#FFD60A", confidence: 87 },
-  { id: 3, position: [41.8280, -71.4140] as [number, number], type: "flood", label: "Standing Water", location: "Waterplace Park", color: "#00F3FF", confidence: 91 },
-  { id: 4, position: [41.8268, -71.4025] as [number, number], type: "debris", label: "Road Debris", location: "Brown University", color: "#30D158", confidence: 78 },
-  { id: 5, position: [41.8210, -71.4220] as [number, number], type: "sign", label: "Damaged Sign", location: "Federal Hill", color: "#FF9F0A", confidence: 85 },
-];
-
+    </div>
+  );
+}
 
 interface MapProps {
   isLive: boolean;
   currentTime: string;
+  onPingsUpdate?: (data: { count: number; latest: Ping | null; pings: Ping[] }) => void;
 }
 
-export default function Map({ isLive, currentTime }: MapProps) {
-  const center: [number, number] = [41.8255, -71.4120];
+export default function Map3D({ isLive, currentTime, onPingsUpdate }: MapProps) {
+  const [pings, setPings] = useState<Ping[]>([]);
+  const [latestPing, setLatestPing] = useState<Ping | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const pingIdsRef = useRef(new Set<string>());
+  const mapRef = useRef<any>(null);
+
+  // Providence, RI center
+  const [viewState, setViewState] = useState({
+    longitude: -71.4120,
+    latitude: 41.8255,
+    zoom: 15,
+    pitch: 50,      // 3D tilt angle
+    bearing: -15,   // Rotation
+  });
+
+  // Add a ping while avoiding duplicates
+  const addPing = useCallback((newPing: Ping) => {
+    if (pingIdsRef.current.has(newPing.id)) {
+      return false;
+    }
+    pingIdsRef.current.add(newPing.id);
+    setPings((prev) => [...prev, newPing]);
+    return true;
+  }, []);
+
+  // Fly to a location
+  const flyTo = useCallback((lat: number, lng: number) => {
+    if (mapRef.current) {
+      mapRef.current.flyTo({
+        center: [lng, lat],
+        zoom: 16,
+        pitch: 55,
+        duration: 2000,
+      });
+    }
+  }, []);
+
+  // Fetch initial pings from Supabase
+  useEffect(() => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    const fetchInitialPings = async () => {
+      const client = getSupabase();
+      if (!client) return;
+      
+      const { data, error } = await client
+        .from("pings")
+        .select("*")
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error("Error fetching pings:", error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        data.forEach((ping: Ping) => pingIdsRef.current.add(ping.id));
+        setPings(data);
+        setLatestPing(data[data.length - 1]);
+        setConnectionStatus("connected");
+      }
+    };
+
+    fetchInitialPings();
+  }, []);
+
+  // Subscribe to realtime INSERT events
+  useEffect(() => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel("pings-realtime-3d")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "pings",
+        },
+        (payload) => {
+          console.log("New ping received:", payload.new);
+          const newPing = payload.new as Ping;
+          const wasAdded = addPing(newPing);
+          if (wasAdded) {
+            setLatestPing(newPing);
+            // Fly to the new ping
+            flyTo(newPing.lat, newPing.lng);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log("Realtime subscription status:", status);
+        if (status === "SUBSCRIBED") {
+          setConnectionStatus("connected");
+        } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+          setConnectionStatus("disconnected");
+        }
+      });
+
+    return () => {
+      console.log("Cleaning up realtime subscription");
+      supabase.removeChannel(channel);
+    };
+  }, [addPing, flyTo]);
+
+  // Notify parent of pings updates
+  useEffect(() => {
+    onPingsUpdate?.({ count: pings.length, latest: latestPing, pings });
+  }, [pings, latestPing, onPingsUpdate]);
 
   return (
     <div className="w-full h-full relative" style={{ background: "#0d1117" }}>
-      <MapContainer
-        center={center}
-        zoom={14}
-        zoomControl={false}
-        scrollWheelZoom={true}
-        style={{ height: "100%", width: "100%", background: "#0d1117" }}
-      >
-        {/* Dark Map Tiles */}
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; CARTO'
+      {/* Connection Status Indicator */}
+      <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10">
+        <div
+          className={`w-2 h-2 rounded-full ${
+            connectionStatus === "connected"
+              ? "bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]"
+              : connectionStatus === "connecting"
+              ? "bg-yellow-500 animate-pulse"
+              : "bg-red-500"
+          }`}
         />
+        <span className="text-[10px] font-bold uppercase tracking-wider text-white/70">
+          {connectionStatus === "connected" ? "Live" : connectionStatus === "connecting" ? "Connecting..." : "Offline"}
+        </span>
+        <span className="text-[10px] text-white/40">{pings.length} pings</span>
+      </div>
 
-        {/* Detection Markers */}
-        {detections.map((d) => (
+      <Map
+        ref={mapRef}
+        {...viewState}
+        onMove={(evt) => setViewState(evt.viewState)}
+        mapStyle={MAP_STYLE}
+        style={{ width: "100%", height: "100%" }}
+        maxPitch={85}
+      >
+        {/* Markers for each ping */}
+        {pings.map((ping) => (
           <Marker
-            key={d.id}
-            position={d.position}
-            icon={createMarkerIcon(d.color, iconsSvg[d.type as keyof typeof iconsSvg])}
-          />
+            key={ping.id}
+            longitude={ping.lng}
+            latitude={ping.lat}
+            anchor="center"
+          >
+            <CustomMarker ping={ping} />
+          </Marker>
         ))}
 
-        <ZoomControl position="bottomleft" />
-      </MapContainer>
+        <NavigationControl position="bottom-left" showCompass={true} />
+      </Map>
 
-      {/* Subtle Vignette - not too dark */}
+      {/* Vignette overlay */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
-          background: "radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%)",
+          background: "radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.5) 100%)",
           zIndex: 500,
         }}
       />
