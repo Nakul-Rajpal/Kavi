@@ -1,0 +1,78 @@
+<ui_design_prompt>
+  <project_name>Kavi: Autonomous City Repair Detection</project_name>
+  <theme>
+    <primary_style>Futuristic Map Dashboard</primary_style>
+    <color_palette>
+      <background>Deep Charcoal / Midnight Blue (#0A0A0B)</background>
+      <accent_neon>Electric Cyan / Neon Blue (#00F3FF)</accent_neon>
+      <glass_effect>Liquid Glassmorphism (High blur, mesh gradients, subtle refraction)</glass_effect>
+      <map_theme>Greyed-out / Desaturated base with neon blue data overlays</map_theme>
+    </color_palette>
+  </theme>
+
+  <layout_structure>
+    <main_container>
+      <map_layer>
+        <component>Leaflet.js Map</component>
+        <styling>
+          - CSS Filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3)
+          - Full-screen background layer
+        </styling>
+        <overlays>
+          - Drone Path: Semi-transparent neon blue polyline
+          - Issue Markers: Pulsing SVG icons (Potholes, Streetlights, etc.)
+          - Marker Colors: Red (High Severity), Yellow (Medium), Green (Low)
+        </overlays>
+      </map_layer>
+
+      <header>
+        <title>Your City, Providence</title>
+        <styling>Modern bold sans-serif, subtle cyan outer glow, glassmorphism background</styling>
+        <actions>
+          <clock_icon>
+            <function>Toggle Time-Travel Timeline</function>
+            <icon>Lucide Clock</icon>
+          </clock_icon>
+          <live_toggle>
+            <function>Open Liquid Glass Side Panel for Live Drone Feed</function>
+            <styling>Neon toggle switch</styling>
+          </live_toggle>
+        </actions>
+      </header>
+
+      <side_panel id="live-drone-view">
+        <appearance>Liquid Glass Design</appearance>
+        <styling>
+          - backdrop-filter: blur(40px)
+          - background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))
+          - border: 1px solid rgba(255,255,255,0.1)
+          - mesh-gradient-overlay: subtle moving cyan/purple blobs
+        </styling>
+        <content>
+          - Live Camera Feed (Simulated)
+          - Drone Telemetry (Alt, Speed, Battery)
+        </content>
+      </side_panel>
+
+      <bottom_controls>
+        <timeline_slider id="time-travel">
+          - Visibility: Only when Clock Icon is active
+          - Function: Scrub through past 24 hours of drone data
+        </timeline_slider>
+      </bottom_controls>
+
+      <floating_actions>
+        <filter_button>
+          <styling>Circular glass button with neon border</styling>
+          <options>Category, Severity, Status</options>
+        </filter_button>
+      </floating_actions>
+    </main_container>
+  </layout_structure>
+
+  <ux_interactions>
+    - Smooth transitions for side panel entry (slide + fade)
+    - Hover effects on map markers showing ticket snapshots
+    - "Liquid" feel: subtle animations on glass panels to simulate surface tension
+  </ux_interactions>
+</ui_design_prompt>

@@ -1,0 +1,236 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 255, 255, 255;
+  --background-start-rgb: 10, 10, 11;
+  --background-end-rgb: 0, 0, 0;
+  --neon-cyan: #00F3FF;
+  --neon-purple: #BC00FF;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-start-rgb));
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ===== LEAFLET MAP STYLING ===== */
+
+/* Dark tile styling - bright enough to read street names */
+.leaflet-tile {
+  filter: brightness(1.3) contrast(1.05) saturate(0.7) !important;
+}
+
+.leaflet-tile-pane {
+  filter: drop-shadow(0 0 1px rgba(0, 243, 255, 0.1));
+}
+
+.leaflet-container {
+  background: #0a0a0b !important;
+  font-family: inherit;
+}
+
+/* Hide default Leaflet attribution styling */
+.leaflet-control-attribution {
+  background: rgba(0, 0, 0, 0.6) !important;
+  color: rgba(255, 255, 255, 0.3) !important;
+  font-size: 9px !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  backdrop-filter: blur(4px);
+}
+
+.leaflet-control-attribution a {
+  color: rgba(0, 243, 255, 0.5) !important;
+}
+
+/* Zoom controls styling */
+.leaflet-control-zoom {
+  border: none !important;
+  background: transparent !important;
+}
+
+.leaflet-control-zoom a {
+  background: rgba(0, 0, 0, 0.7) !important;
+  color: white !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(8px);
+  width: 36px !important;
+  height: 36px !important;
+  line-height: 34px !important;
+  font-size: 18px !important;
+  transition: all 0.2s ease;
+}
+
+.leaflet-control-zoom a:hover {
+  background: rgba(0, 243, 255, 0.2) !important;
+  border-color: rgba(0, 243, 255, 0.4) !important;
+  color: #00F3FF !important;
+}
+
+.leaflet-control-zoom-in {
+  border-radius: 8px 8px 0 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.leaflet-control-zoom-out {
+  border-radius: 0 0 8px 8px !important;
+}
+
+/* ===== MARKER ANIMATIONS ===== */
+
+@keyframes pulse-glow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.5;
+  }
+}
+
+@keyframes drone-ping {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+/* Custom marker icon reset */
+.custom-marker-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.drone-marker-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* ===== GLASS PANEL STYLING ===== */
+
+.glass-panel {
+  @apply backdrop-blur-2xl bg-black/20 border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)];
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-panel::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at center, rgba(0, 243, 255, 0.06) 0%, transparent 50%);
+  z-index: -1;
+  animation: liquid-flow 20s infinite alternate ease-in-out;
+}
+
+.liquid-glass {
+  @apply glass-panel;
+  background: linear-gradient(165deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%);
+  box-shadow: 
+    inset 0 0 30px rgba(0, 243, 255, 0.03),
+    0 20px 50px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+@keyframes liquid-flow {
+  0% {
+    transform: translate(-10%, -10%) rotate(0deg);
+  }
+  50% {
+    transform: translate(5%, 5%) rotate(3deg);
+  }
+  100% {
+    transform: translate(-5%, 10%) rotate(-3deg);
+  }
+}
+
+/* ===== NEON PATH STYLING ===== */
+
+.leaflet-interactive {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ===== INFO CARD STYLING ===== */
+
+.info-card {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  animation: float 4s ease-in-out infinite;
+}
+
+/* ===== CUSTOM SCROLLBAR ===== */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 243, 255, 0.2);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 243, 255, 0.4);
+}
+
+/* ===== UTILITY CLASSES ===== */
+
+.text-glow {
+  text-shadow: 0 0 20px currentColor;
+}
+
+.neon-border {
+  box-shadow: 0 0 15px currentColor, inset 0 0 15px currentColor;
+}
+
+/* ===== LEAFLET POPUP OVERRIDE (if needed) ===== */
+
+.leaflet-popup-content-wrapper {
+  background: rgba(0, 0, 0, 0.85) !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(12px);
+}
+
+.leaflet-popup-tip {
+  background: rgba(0, 0, 0, 0.85) !important;
+}
+
+.leaflet-popup-content {
+  margin: 0 !important;
+  color: white;
+}
+
+.leaflet-popup-close-button {
+  color: white !important;
+}
