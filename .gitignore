@@ -50,3 +50,6 @@ Model/results/
 *.pt
 *.pth
 *.onnx
+
+# Drone / video footage (large files)
+footage/

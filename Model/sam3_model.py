@@ -103,10 +103,14 @@ class SAM3Model:
         if isinstance(text_prompts, str):
             text_prompts = [text_prompts]
 
+        # SAM3 processor tokenizes with max_length=32; passing a list batches to N*32 tokens
+        # and the DETR encoder expects a single 32-token sequence. Use one prompt per call.
+        text_for_processor = text_prompts[0] if text_prompts else "object"
+
         # Process inputs (processor adds original_sizes for post-processing)
         inputs = self.processor(
             images=image,
-            text=text_prompts[0] if len(text_prompts) == 1 else text_prompts,
+            text=text_for_processor,
             return_tensors="pt"
         )
         # Move to device; keep original_sizes for post_process, don't pass to model

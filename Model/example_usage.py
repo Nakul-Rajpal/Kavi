@@ -226,7 +226,7 @@ def example_5_custom_configuration():
             device="cuda"
         ),
         video=VideoConfig(
-            resize_height=720,  # Process at 720p
+            max_side=720,  # Cap longer side to 720px (avoids SAM3 shape errors)
             process_every_n_frames=3,  # Process every 3rd frame
             enable_enhancement=True,  # Enable image enhancement
             enable_denoising=False  # Disable denoising for speed
@@ -240,7 +240,7 @@ def example_5_custom_configuration():
 
     print(f"\nConfiguration:")
     print(f"  Model: {config.model.model_type}")
-    print(f"  Video: {config.video.resize_height}p, every {config.video.process_every_n_frames} frames")
+    print(f"  Video: max_side={config.video.max_side}px, every {config.video.process_every_n_frames} frames")
     print(f"  Detection: threshold={config.detection.confidence_threshold}")
 
     # Initialize with config

@@ -50,6 +50,58 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 Automated pothole detection from drone video using Meta's SAM3 (Segment Anything Model 3) with GPS telemetry integration.
 
+### How it works (video → final output)
+
+1. **You give it a video**  
+   You run the program with a video file (e.g. `your_video.mp4`) or a live stream URL. Optionally you can pass a telemetry file (GPS per frame).
+
+2. **It reads the video frame by frame**  
+   The program opens the video and goes through it frame by frame. To save time, it can process only every 5th or 10th frame (you set this with `--process-every-n`).
+
+3. **Each frame is prepared and sent to the AI**  
+   For each frame it keeps, the program resizes it and does a bit of image improvement (contrast, sharpening). Then it sends that frame to the SAM3 model and asks: “Where are potholes (or road damage) in this image?”
+
+4. **The AI returns detections**  
+   The model returns regions it thinks are potholes: a box around each one, a mask (which pixels belong to it), and a confidence score. The program filters out very small or odd-shaped regions so you get fewer false alarms.
+
+5. **Results are saved**  
+   For every pothole found, the program records: frame number, position (box), confidence, and area. If you gave a telemetry file, it can attach GPS to each detection. At the end it writes:
+   - **detections.json** – all detections in one structured file  
+   - **detections.csv** – same data in spreadsheet form  
+   - **summary.json** – counts and simple stats  
+   - **Annotated images** – frames where potholes were found, with boxes (and optional masks) drawn on them  
+
+   All of this goes into a timestamped folder under `./results/` (or whatever you set with `--output`).
+
+So in short: **video in → frames → AI finds potholes → we save boxes, scores, and pictures.**
+
+### Telemetry (GPS / location)
+
+**What it is**  
+Telemetry is location data from the drone (latitude, longitude, altitude, and sometimes heading/speed). It tells you *where* each frame was recorded, so you can attach a real-world position to each pothole.
+
+**How you give it to the program**  
+When you process a **recorded video** (not live stream), you can pass a telemetry file with `--telemetry`:
+
+```bash
+python3.11 -m Model.main your_video.mp4 --telemetry telemetry.srt
+```
+
+**Supported formats**
+
+- **SRT** – Common with DJI drones (subtitle-style file with GPS lines).
+- **CSV** – Columns like `frame_number`, `latitude`, `longitude`, `altitude`.
+- **JSON** – List of objects with `frame_number` and position fields.
+
+**How it’s used**  
+The program loads the telemetry and matches it to video frames by **frame number**. If a frame doesn’t have an exact match, it uses the **nearest** frame’s telemetry (within a short range). Each pothole detection then gets that frame’s latitude, longitude, and altitude attached.
+
+**Where it shows up**  
+In **detections.json** and **detections.csv**, each detection has a `telemetry` (or latitude/longitude/altitude) field when telemetry was available for that frame. You can use that to plot detections on a map or report locations.
+
+**Live stream**  
+For live DJI Fly → RTMP, telemetry is not read from a file in the current setup; you’d need a separate source (e.g. an app that logs GPS in real time) to attach location during live runs.
+
 ### Quick Start
 
 #### 1. Request SAM3 Access

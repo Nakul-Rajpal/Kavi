@@ -197,34 +197,36 @@ class VideoProcessor:
 class FrameProcessor:
     """Process individual frames for pothole detection"""
 
-    def __init__(self, resize_height: int = 720):
+    def __init__(self, max_side: int = 720):
         """
-        Initialize frame processor
+        Initialize frame processor.
 
         Args:
-            resize_height: Target height for frame resizing (maintains aspect ratio)
+            max_side: Maximum length of the longer side (width or height). Frames are
+                resized so the longer side equals this value, preserving aspect ratio.
+                Use 720 for speed/quality balance; use 512 if SAM3 still hits shape errors.
         """
-        self.resize_height = resize_height
+        self.max_side = max_side
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """
-        Preprocess frame for model input
+        Preprocess frame for model input. Caps the longer side to max_side to avoid
+        SAM3 encoder shape mismatches (e.g. RuntimeError with large or non-square inputs).
 
         Args:
             frame: Input frame (RGB)
 
         Returns:
-            Preprocessed frame
+            Preprocessed frame (same aspect ratio, longer side <= max_side)
         """
-        # Resize frame to reduce computation
         height, width = frame.shape[:2]
-
-        if height > self.resize_height:
-            scale = self.resize_height / height
-            new_width = int(width * scale)
-            frame = cv2.resize(frame, (new_width, self.resize_height))
-
-        return frame
+        longer = max(height, width)
+        if longer <= self.max_side:
+            return frame
+        scale = self.max_side / longer
+        new_w = int(round(width * scale))
+        new_h = int(round(height * scale))
+        return cv2.resize(frame, (new_w, new_h))
 
     def enhance_frame(self, frame: np.ndarray) -> np.ndarray:
         """

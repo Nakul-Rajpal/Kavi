@@ -19,7 +19,7 @@ class ModelConfig:
 @dataclass
 class VideoConfig:
     """Video processing configuration"""
-    resize_height: int = 720  # Resize frames to this height
+    max_side: int = 720  # Cap frame longer side to this (keeps aspect ratio; helps avoid SAM3 shape errors)
     process_every_n_frames: int = 5  # Process every Nth frame (1 = all frames)
     buffer_size: int = 30  # Frame buffer size for live processing
     enable_enhancement: bool = True  # Enable image enhancement
@@ -87,7 +87,7 @@ class PipelineConfig:
                 device=os.getenv('SAM_DEVICE', 'cuda')
             ),
             video=VideoConfig(
-                resize_height=int(os.getenv('VIDEO_RESIZE_HEIGHT', '720')),
+                max_side=int(os.getenv('VIDEO_MAX_SIDE', '720')),
                 process_every_n_frames=int(os.getenv('PROCESS_EVERY_N_FRAMES', '5'))
             ),
             detection=DetectionConfig(
