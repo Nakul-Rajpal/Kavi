@@ -58,6 +58,15 @@ class ReportingConfig:
 
 
 @dataclass
+class DeduplicationConfig:
+    """Deduplication configuration for tracking unique potholes across frames"""
+    enabled: bool = True  # Enable deduplication
+    iou_threshold: float = 0.15  # Min overlap to consider same pothole (0.0-1.0)
+    centroid_threshold: float = 100.0  # Max centroid distance (pixels) to consider same pothole
+    max_age_frames: int = 100  # Frames before pothole is "forgotten" (prevents false matches)
+
+
+@dataclass
 class PipelineConfig:
     """Complete pipeline configuration"""
     model: ModelConfig
@@ -65,6 +74,7 @@ class PipelineConfig:
     detection: DetectionConfig
     telemetry: TelemetryConfig
     reporting: ReportingConfig
+    deduplication: DeduplicationConfig
 
     @classmethod
     def default(cls) -> 'PipelineConfig':
@@ -74,7 +84,8 @@ class PipelineConfig:
             video=VideoConfig(),
             detection=DetectionConfig(),
             telemetry=TelemetryConfig(),
-            reporting=ReportingConfig()
+            reporting=ReportingConfig(),
+            deduplication=DeduplicationConfig()
         )
 
     @classmethod
@@ -100,6 +111,12 @@ class PipelineConfig:
                 api_endpoint=os.getenv('API_ENDPOINT'),
                 api_key=os.getenv('API_KEY'),
                 output_dir=os.getenv('OUTPUT_DIR', './results')
+            ),
+            deduplication=DeduplicationConfig(
+                enabled=os.getenv('DEDUP_ENABLED', 'true').lower() == 'true',
+                iou_threshold=float(os.getenv('DEDUP_IOU_THRESHOLD', '0.15')),
+                centroid_threshold=float(os.getenv('DEDUP_CENTROID_THRESHOLD', '100.0')),
+                max_age_frames=int(os.getenv('DEDUP_MAX_AGE_FRAMES', '100'))
             )
         )
 

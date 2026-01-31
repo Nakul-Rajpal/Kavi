@@ -51,5 +51,10 @@ Model/results/
 *.pth
 *.onnx
 
+# Detection results (generated output)
+results/
+results_dedup/
+results_dedup2/
+
 # Drone / video footage (large files)
 footage/

@@ -1,6 +1,6 @@
 """
 Complete Pothole Detection Pipeline
-Integrates SAM3, video processing, and telemetry handling
+Integrates SAM3, video processing, telemetry handling, and deduplication
 """
 
 import numpy as np
@@ -12,6 +12,7 @@ import json
 from .sam3_model import SAM3Model, SAM3PotholeDetector
 from .video_processor import VideoProcessor, FrameProcessor
 from .telemetry_handler import TelemetryHandler, TelemetryData
+from .deduplication import PotholeTracker
 
 
 @dataclass
@@ -44,7 +45,11 @@ class PotholeDetectionPipeline:
         video_source: str,
         telemetry_file: Optional[str] = None,
         confidence_threshold: float = 0.5,
-        process_every_n_frames: int = 1
+        process_every_n_frames: int = 1,
+        enable_deduplication: bool = True,
+        dedup_iou_threshold: float = 0.15,
+        dedup_centroid_threshold: float = 100.0,
+        dedup_max_age_frames: int = 100
     ):
         """
         Initialize detection pipeline
@@ -55,6 +60,10 @@ class PotholeDetectionPipeline:
             telemetry_file: Path to telemetry data file
             confidence_threshold: Minimum confidence for pothole detection
             process_every_n_frames: Process every Nth frame (1 = process all frames)
+            enable_deduplication: Whether to deduplicate detections across frames
+            dedup_iou_threshold: IoU threshold for considering two detections the same
+            dedup_centroid_threshold: Max centroid distance (pixels) to consider same pothole
+            dedup_max_age_frames: Frames before a tracked pothole is forgotten
         """
         self.sam_detector = SAM3PotholeDetector(sam_model)
         self.video_processor = VideoProcessor(video_source)
@@ -63,9 +72,19 @@ class PotholeDetectionPipeline:
 
         self.confidence_threshold = confidence_threshold
         self.process_every_n_frames = process_every_n_frames
+        
+        # Deduplication settings
+        self.enable_deduplication = enable_deduplication
+        self.tracker = PotholeTracker(
+            iou_threshold=dedup_iou_threshold,
+            centroid_threshold=dedup_centroid_threshold,
+            max_age_frames=dedup_max_age_frames,
+            min_confidence=confidence_threshold
+        ) if enable_deduplication else None
 
         self.detections: List[PotholeDetection] = []
         self.detection_counter = 0
+        self.total_raw_detections = 0  # Count before deduplication
 
     def process_video(
         self,
@@ -82,10 +101,19 @@ class PotholeDetectionPipeline:
             max_frames: Maximum number of frames to process
 
         Returns:
-            List of pothole detections
+            List of pothole detections (deduplicated if enabled)
         """
         print("Starting video processing...")
+        if self.enable_deduplication:
+            print("Deduplication ENABLED (IoU-based tracking)")
+        else:
+            print("Deduplication DISABLED")
+            
         self.detections = []
+        self.total_raw_detections = 0
+        
+        if self.tracker:
+            self.tracker.reset()
 
         for frame_num, frame in self.video_processor.process_frames(
             skip_frames=self.process_every_n_frames - 1,
@@ -100,20 +128,37 @@ class PotholeDetectionPipeline:
                 enhanced,
                 confidence_threshold=self.confidence_threshold
             )
+            
+            # Track raw detection count
+            self.total_raw_detections += len(potholes)
 
             # Get telemetry for this frame
             telemetry = self.telemetry_handler.interpolate_telemetry(frame_num)
 
-            # Process each detection
-            for pothole in potholes:
-                detection = self._create_detection(
-                    frame_num=frame_num,
-                    pothole=pothole,
-                    telemetry=telemetry
-                )
-                self.detections.append(detection)
+            # Apply deduplication if enabled
+            if self.enable_deduplication and self.tracker:
+                # Only get NEW unique potholes (not seen before)
+                unique_potholes = self.tracker.update(potholes, frame_num)
+                
+                # Process only new unique detections
+                for pothole in unique_potholes:
+                    detection = self._create_detection(
+                        frame_num=frame_num,
+                        pothole=pothole,
+                        telemetry=telemetry
+                    )
+                    self.detections.append(detection)
+            else:
+                # No deduplication - process all detections
+                for pothole in potholes:
+                    detection = self._create_detection(
+                        frame_num=frame_num,
+                        pothole=pothole,
+                        telemetry=telemetry
+                    )
+                    self.detections.append(detection)
 
-            # Save annotated frame if requested
+            # Save annotated frame if requested (use all potholes for visualization)
             if save_frames and output_dir and len(potholes) > 0:
                 annotated = self.frame_processor.annotate_detections(
                     enhanced, potholes
@@ -124,9 +169,20 @@ class PotholeDetectionPipeline:
 
             # Progress update
             if frame_num % 100 == 0:
-                print(f"Processed frame {frame_num}, found {len(self.detections)} potholes so far")
+                if self.enable_deduplication:
+                    print(f"Processed frame {frame_num}, {self.total_raw_detections} raw -> {len(self.detections)} unique potholes")
+                else:
+                    print(f"Processed frame {frame_num}, found {len(self.detections)} potholes so far")
 
-        print(f"\nProcessing complete! Found {len(self.detections)} potholes total")
+        # Final summary
+        if self.enable_deduplication:
+            print(f"\nProcessing complete!")
+            print(f"  Raw detections: {self.total_raw_detections}")
+            print(f"  Unique potholes: {len(self.detections)}")
+            print(f"  Deduplication ratio: {self.total_raw_detections / max(len(self.detections), 1):.1f}x")
+        else:
+            print(f"\nProcessing complete! Found {len(self.detections)} potholes total")
+            
         return self.detections
 
     def process_live_stream(
@@ -142,7 +198,13 @@ class PotholeDetectionPipeline:
             output_dir: Directory to save frames with detections
         """
         print("Starting live video processing...")
+        if self.enable_deduplication:
+            print("Deduplication ENABLED (IoU-based tracking)")
+            
         self.video_processor.start_live_capture()
+        
+        if self.tracker:
+            self.tracker.reset()
 
         try:
             frame_count = 0
@@ -167,27 +229,45 @@ class PotholeDetectionPipeline:
                     enhanced,
                     confidence_threshold=self.confidence_threshold
                 )
+                
+                # Track raw detections
+                self.total_raw_detections += len(potholes)
 
                 # Get telemetry (if available via live stream)
                 telemetry = self.telemetry_handler.get_telemetry(frame_count)
 
-                # Process detections
+                # Apply deduplication if enabled
                 frame_detections = []
-                for pothole in potholes:
-                    detection = self._create_detection(
-                        frame_num=frame_count,
-                        pothole=pothole,
-                        telemetry=telemetry
-                    )
-                    frame_detections.append(detection)
-                    self.detections.append(detection)
+                
+                if self.enable_deduplication and self.tracker:
+                    # Only get NEW unique potholes
+                    unique_potholes = self.tracker.update(potholes, frame_count)
+                    
+                    for pothole in unique_potholes:
+                        detection = self._create_detection(
+                            frame_num=frame_count,
+                            pothole=pothole,
+                            telemetry=telemetry
+                        )
+                        frame_detections.append(detection)
+                        self.detections.append(detection)
+                else:
+                    # No deduplication
+                    for pothole in potholes:
+                        detection = self._create_detection(
+                            frame_num=frame_count,
+                            pothole=pothole,
+                            telemetry=telemetry
+                        )
+                        frame_detections.append(detection)
+                        self.detections.append(detection)
 
-                # Call callback function if provided
+                # Call callback function if provided (only for NEW detections)
                 if callback_func and frame_detections:
                     callback_func(frame_detections, enhanced)
 
                 # Save frame if requested
-                if output_dir and frame_detections:
+                if output_dir and len(potholes) > 0:
                     annotated = self.frame_processor.annotate_detections(
                         enhanced, potholes
                     )
@@ -201,7 +281,12 @@ class PotholeDetectionPipeline:
             print("\nStopping live processing...")
         finally:
             self.video_processor.stop_live_capture()
-            print(f"Processed {frame_count} frames, found {len(self.detections)} potholes")
+            if self.enable_deduplication:
+                print(f"Processed {frame_count} frames")
+                print(f"  Raw detections: {self.total_raw_detections}")
+                print(f"  Unique potholes: {len(self.detections)}")
+            else:
+                print(f"Processed {frame_count} frames, found {len(self.detections)} potholes")
 
     def _create_detection(
         self,
@@ -243,9 +328,11 @@ class PotholeDetectionPipeline:
         """
         if not self.detections:
             return {
-                'total_detections': 0,
+                'unique_potholes': 0,
+                'total_raw_detections': self.total_raw_detections,
                 'frames_with_potholes': 0,
-                'average_confidence': 0.0
+                'average_confidence': 0.0,
+                'deduplication_enabled': self.enable_deduplication
             }
 
         frames_with_potholes = len(set(d.frame_number for d in self.detections))
@@ -253,9 +340,15 @@ class PotholeDetectionPipeline:
 
         # Group by location if telemetry available
         detections_with_gps = [d for d in self.detections if d.telemetry and d.telemetry.get('latitude')]
+        
+        # Calculate deduplication ratio
+        dedup_ratio = self.total_raw_detections / max(len(self.detections), 1)
 
         return {
-            'total_detections': len(self.detections),
+            'unique_potholes': len(self.detections),
+            'total_raw_detections': self.total_raw_detections,
+            'deduplication_ratio': float(dedup_ratio),
+            'deduplication_enabled': self.enable_deduplication,
             'frames_with_potholes': frames_with_potholes,
             'average_confidence': float(avg_confidence),
             'detections_with_gps': len(detections_with_gps),
@@ -319,4 +412,4 @@ class PotholeDetectionPipeline:
                     }
                     writer.writerow(row)
 
-        print(f"Exported {len(self.detections)} detections to {output_file}")
+        print(f"Exported {len(self.detections)} unique detections to {output_file}")
