@@ -59,7 +59,6 @@ def process_video_file(
     pipeline = PotholeDetectionPipeline(
         sam_model=sam_model,
         video_source=video_path,
-        telemetry_file=telemetry_file,
         confidence_threshold=confidence,
         process_every_n_frames=process_every_n
     )
@@ -178,7 +177,6 @@ def process_live_stream(
     pipeline = PotholeDetectionPipeline(
         sam_model=sam_model,
         video_source=video_source,
-        telemetry_file=None,  # No telemetry for live stream
         confidence_threshold=confidence,
         process_every_n_frames=process_every_n
     )
@@ -278,16 +276,9 @@ def process_live_stream(
                     print(f"    [SKIP] Already submitted as ticket")
                     continue
                 
-                # Get GPS coordinates
-                lat = None
-                lng = None
-                
-                if det.telemetry and det.telemetry.latitude and det.telemetry.longitude:
-                    lat = det.telemetry.latitude
-                    lng = det.telemetry.longitude
-                elif default_lat and default_lng:
-                    lat = default_lat
-                    lng = default_lng
+                # Get GPS coordinates (telemetry not implemented, use defaults)
+                lat = default_lat
+                lng = default_lng
                 
                 if lat and lng:
                     # Queue ticket creation (non-blocking)
