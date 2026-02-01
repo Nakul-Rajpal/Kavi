@@ -5,6 +5,7 @@ Supports files, camera index, and live stream URLs (RTSP/RTMP) for DJI and other
 """
 
 import os
+import time
 import cv2
 import numpy as np
 from typing import Generator, Tuple, Optional, Dict
@@ -17,6 +18,12 @@ def _is_stream_url(source: str) -> bool:
     """Return True if source is an RTSP or RTMP stream URL."""
     s = (source or "").strip().lower()
     return s.startswith("rtsp://") or s.startswith("rtmp://")
+
+
+# OpenCV's FFmpeg backend uses a ~30s timeout when no data is received.
+# If you start Kavi before DJI Fly is streaming, the first open will time out.
+STREAM_OPEN_RETRIES = 5
+STREAM_OPEN_RETRY_DELAY_SEC = 12
 
 
 def _open_stream_capture(source: str):
@@ -52,15 +59,39 @@ class VideoProcessor:
     def open_video(self) -> bool:
         """
         Open video source (file, camera index, or RTSP/RTMP URL).
+        For stream URLs, retries several times so you can start the stream (e.g. DJI Fly) after launching Kavi.
 
         Returns:
             True if successful, False otherwise
         """
         try:
             if self._is_stream:
-                self.cap = _open_stream_capture(self.video_source)
+                self.cap = None
+                for attempt in range(1, STREAM_OPEN_RETRIES + 1):
+                    self.cap = _open_stream_capture(self.video_source)
+                    if self.cap.isOpened():
+                        break
+                    self.cap.release()
+                    self.cap = None
+                    if attempt < STREAM_OPEN_RETRIES:
+                        print(
+                            f"Stream not ready (attempt {attempt}/{STREAM_OPEN_RETRIES}). "
+                            "Start DJI Fly → Transmission → RTMP → Start stream, then wait."
+                        )
+                        print(f"  URL: {self.video_source}")
+                        print(f"  Retrying in {STREAM_OPEN_RETRY_DELAY_SEC}s...")
+                        time.sleep(STREAM_OPEN_RETRY_DELAY_SEC)
+                if self.cap is None or not self.cap.isOpened():
+                    print(f"Failed to open video source after {STREAM_OPEN_RETRIES} attempts: {self.video_source}")
+                    if self._is_stream:
+                        print(
+                            "  For RTMP: ensure (1) Docker RTMP server is running, "
+                            "(2) DJI Fly is streaming to rtmp://YOUR_PC_IP:1935/stream/dji"
+                        )
+                    return False
             else:
                 self.cap = cv2.VideoCapture(self.video_source)
+
             if not self.cap.isOpened():
                 print(f"Failed to open video source: {self.video_source}")
                 return False
@@ -190,8 +221,9 @@ class VideoProcessor:
 
     def close(self):
         """Release video capture resources"""
-        if hasattr(self, 'cap'):
+        if hasattr(self, 'cap') and self.cap is not None:
             self.cap.release()
+            self.cap = None
 
 
 class FrameProcessor:

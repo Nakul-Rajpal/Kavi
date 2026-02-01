@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Header from "@/components/Header";
 import GlassPanel from "@/components/GlassPanel";
 import Timeline from "@/components/Timeline";
@@ -29,6 +29,16 @@ export default function Dashboard() {
   const [currentTime, setCurrentTime] = useState("12:00 PM");
   const [pings, setPings] = useState<Ping[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const [liveStreamUrl, setLiveStreamUrl] = useState<string | null>(null);
+
+  // Fetch live stream URL when Live tab is opened (from API or env)
+  useEffect(() => {
+    if (!isLive) return;
+    fetch("/api/stream")
+      .then((res) => res.json())
+      .then((data) => setLiveStreamUrl(data.streamUrl ?? null))
+      .catch(() => setLiveStreamUrl(null));
+  }, [isLive]);
 
   const handlePingsUpdate = useCallback((data: { count: number; latest: Ping | null; pings: Ping[] }) => {
     setPings(data.pings);
@@ -65,6 +75,8 @@ export default function Dashboard() {
             <GlassPanel 
               onClose={() => setIsLive(false)} 
               title="Live Drone Feed"
+              streamUrl={liveStreamUrl}
+              fullScreen
             />
           )}
         </AnimatePresence>
