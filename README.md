@@ -20,7 +20,7 @@ A real-time visualization dashboard built with Next.js, React, and Leaflet.
 - Interactive dark-themed map of Providence, RI
 - Real-time detection markers with severity indicators
 - Liquid glass UI design with modern aesthetics
-- Live drone feed panel
+- **Live drone feed panel** – Click **Live** in the header to open the Live tab; it shows the DJI stream via HLS when the RTMP server is running and DJI Fly is streaming (see [DJI Air 3S setup](Model/DJI_AIR_3S_SETUP.md)).
 - Historical timeline playback
 - Filter by issue type, severity, and status
 

@@ -24,8 +24,8 @@ chmod +x run_dji_live_rtmp.sh
 # One-time: pull the image
 docker pull alfg/nginx-rtmp
 
-# Start server (receives on rtmp://YOUR_PC:1935/stream/STREAM_KEY)
-docker run -d -p 1935:1935 --name kavi-rtmp alfg/nginx-rtmp
+# Start server: 1935 = RTMP ingest, 8080 = HLS for the Kavi UI Live tab
+docker run -d -p 1935:1935 -p 8080:80 --name kavi-rtmp alfg/nginx-rtmp
 ```
 
 ### Step 2: Get your computer’s IP
@@ -74,6 +74,9 @@ python3.11 main.py "rtmp://localhost:1935/stream/dji" --live --process-every-n 1
 ```
 
 Results are saved under `./results/`. Press **Ctrl+C** to stop.
+
+**View the live feed in the Kavi UI:**  
+Run the dashboard (`npm run dev` in the repo root), open [http://localhost:3000](http://localhost:3000), and click **Live** in the header. The Live tab shows the same DJI stream via HLS (port 8080). If the stream does not appear, see **"Stream works on device but not on webpage"** below.
 
 ---
 
@@ -195,9 +198,47 @@ For **GPS/altitude** with detections:
 - **Single "RTMP Address" field:**  
   Use: `rtmp://YOUR_MAC_IP:1935/stream/dji` (no space or slash at the end).
 - **Same Wi‑Fi:** Phone/RC and Mac on the same network; get Mac IP with `ipconfig getifaddr en0`.
-- **Server running:** On Mac run `docker ps`; if `kavi-rtmp` is not listed, run `docker start kavi-rtmp` or start it with `docker run -d -p 1935:1935 --name kavi-rtmp alfg/nginx-rtmp`.
+- **Server running:** On Mac run `docker ps`; if `kavi-rtmp` is not listed, run `docker start kavi-rtmp` or start it with `docker run -d -p 1935:1935 -p 8080:80 --name kavi-rtmp alfg/nginx-rtmp`.
 - **Firewall:** Allow incoming connections on port **1935** (Mac System Settings → Network → Firewall).
 - **Typo:** Re-type the IP; do not add a trailing slash or space.
+
+---
+
+### If DJI Fly says "Livestream error" (or stream fails to start)
+
+1. **Same Wi‑Fi**  
+   The **remote controller (or phone)** must be on the **same Wi‑Fi network** as your Mac. If the RC uses the drone’s WiFi (e.g. for control), the *device running DJI Fly* (RC built-in screen or phone) must still be on your home/office Wi‑Fi so it can reach your Mac’s IP.  
+   - On Mac: `ipconfig getifaddr en0` (or `en1`) → e.g. `192.168.1.100`  
+   - That IP must be reachable from the device running DJI Fly.
+
+2. **RTMP server must be running**  
+   On your Mac:
+   ```bash
+   docker ps
+   ```
+   You should see `kavi-rtmp` (or the container you started). If not:
+   ```bash
+   docker start kavi-rtmp
+   # or first time:
+   docker run -d -p 1935:1935 -p 8080:80 --name kavi-rtmp alfg/nginx-rtmp
+   ```
+
+3. **Port 1935 open on the Mac**  
+   - **Mac firewall:** System Settings → Network → Firewall → Options. Ensure "Block all incoming connections" is off, or add an allow rule for the app that needs port 1935 (e.g. Docker or "Python").  
+   - **Router:** Usually no need to open 1935 to the internet; same‑network streaming only needs the Mac to accept connections on 1935 from the LAN.
+
+4. **Use the correct URL format**  
+   - **One field:** `rtmp://YOUR_MAC_IP:1935/stream/dji` (replace `YOUR_MAC_IP` with the Mac’s IP; no `https://`, no trailing `/` or space).  
+   - **Two fields:** Address `rtmp://YOUR_MAC_IP:1935/stream`, Stream key `dji`.
+
+5. **Try the other field style**  
+   If you used one field and it fails, try two fields (address + stream key), or the other way around, depending on what your DJI Fly version shows.
+
+6. **Mic permission (if prompted)**  
+   Some DJI Fly builds ask for microphone access to start a live stream. You can allow it and mute the mic; the stream only needs the video.
+
+7. **Ping the Mac from the RC/phone (if possible)**  
+   If the device running DJI Fly can run a browser or terminal, try opening `http://YOUR_MAC_IP` (e.g. `http://192.168.1.100`). If that never loads, the device can’t reach the Mac (wrong network, firewall, or wrong IP).
 
 ---
 
@@ -205,6 +246,13 @@ For **GPS/altitude** with detections:
 
 - **“Failed to open video source”** – Check that the RTMP/RTSP server is running, the URL is correct, and (for RTMP) the app has started streaming. For RTSP, try TCP: the code sets FFmpeg options for RTSP transport.
 - **Delayed or choppy** – Use `--process-every-n 10` (or higher) to reduce CPU/GPU load; close other apps.
-- **OpenCV + RTMP** – If your OpenCV build doesn’t support RTMP, use an RTMP→RTSP relay and pass the RTSP URL to Kavi.
+- **OpenCV + RTMP** – If your OpenCV build doesn't support RTMP, use an RTMP→RTSP relay and pass the RTSP URL to Kavi.
+
+### Stream works on device but not on webpage
+
+1. **HLS port 8080 must be exposed** – Run `docker ps` and check for `0.0.0.0:8080->80/tcp` on `kavi-rtmp`. If 8080 is missing, recreate: `docker rm -f kavi-rtmp` then `./Model/run_dji_live_rtmp.sh`.
+2. **Test HLS** – With DJI Fly streaming, open `http://localhost:8080/live/dji_720p2628kbs/index.m3u8` on the Mac. If it downloads or shows playlist text, HLS works; refresh the Live tab.
+3. **Viewing from another device** – The stream is on the Mac. Create `.env.local` with `NEXT_PUBLIC_LIVE_STREAM_URL=http://YOUR_MAC_IP:8080/live/dji_720p2628kbs/index.m3u8` (use Mac IP from `ipconfig getifaddr en0`), restart `npm run dev`, and open the UI at `http://YOUR_MAC_IP:3000`.
+4. **Firewall** – Allow inbound on ports 8080 and 3000 if viewing from another device.
 
 This setup is tailored to the **DJI Air 3S** used with **DJI Fly** and optional **MSDK/RTSP**; the same flow applies to other DJI consumer drones that support RTMP live streaming in the Fly app.

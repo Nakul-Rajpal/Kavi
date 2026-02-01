@@ -107,17 +107,19 @@ def process_video_file(
     csv_file = Path(output_dir) / file_reporter.session_dir.name / "detections.csv"
     pipeline.export_results(str(csv_file), format='csv')
 
-    # Print summary
+    # Print summary (summary uses unique_potholes/total_raw_detections from pipeline)
     print("\n" + "=" * 60)
     print("DETECTION SUMMARY")
     print("=" * 60)
-    print(f"Total detections: {summary['total_detections']}")
-    print(f"Frames with potholes: {summary['frames_with_potholes']}")
-    print(f"Average confidence: {summary['average_confidence']:.3f}")
-    print(f"Detections with GPS: {summary['detections_with_gps']}")
-    print("\nConfidence distribution:")
-    for level, count in summary['confidence_distribution'].items():
-        print(f"  {level}: {count}")
+    print(f"Unique potholes: {summary.get('unique_potholes', 0)}")
+    print(f"Total raw detections: {summary.get('total_raw_detections', 0)}")
+    print(f"Frames with potholes: {summary.get('frames_with_potholes', 0)}")
+    print(f"Average confidence: {summary.get('average_confidence', 0.0):.3f}")
+    print(f"Detections with GPS: {summary.get('detections_with_gps', 0)}")
+    if summary.get('confidence_distribution'):
+        print("Confidence distribution:")
+        for level, count in summary['confidence_distribution'].items():
+            print(f"  {level}: {count}")
     print("\nResults saved to:", file_reporter.session_dir)
     print("=" * 60)
 
@@ -216,13 +218,14 @@ def process_live_stream(
     summary = pipeline.get_detections_summary()
     file_reporter.save_summary(summary)
 
-    # Print summary
+    # Print summary (summary uses unique_potholes/total_raw_detections from pipeline)
     print("\n" + "=" * 60)
     print("DETECTION SUMMARY")
     print("=" * 60)
-    print(f"Total detections: {summary['total_detections']}")
-    print(f"Frames with potholes: {summary['frames_with_potholes']}")
-    print(f"Average confidence: {summary['average_confidence']:.3f}")
+    print(f"Unique potholes: {summary.get('unique_potholes', 0)}")
+    print(f"Total raw detections: {summary.get('total_raw_detections', 0)}")
+    print(f"Frames with potholes: {summary.get('frames_with_potholes', 0)}")
+    print(f"Average confidence: {summary.get('average_confidence', 0.0):.3f}")
     print("\nResults saved to:", file_reporter.session_dir)
     print("=" * 60)
 

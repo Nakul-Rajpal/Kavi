@@ -1,24 +1,44 @@
 #!/usr/bin/env bash
-# Option 1: Start RTMP server for DJI Air 3S and run Kavi on the live feed.
-# Usage: ./run_dji_live_rtmp.sh [extra args for main.py, e.g. --process-every-n 10]
+# Start RTMP server for DJI Air 3S so the live video shows in the Kavi UI (Live tab).
+# By default this only starts the server; no model processing.
+#
+# Usage:
+#   ./run_dji_live_rtmp.sh              # Video only: start server, show instructions
+#   ./run_dji_live_rtmp.sh --with-detection [args]  # Also run SAM3 detection on the stream
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Faster Hugging Face download (optional: pip install hf-transfer)
-if python3.11 -c "import hf_transfer" 2>/dev/null; then
-  export HF_HUB_ENABLE_HF_TRANSFER=1
-fi
+RUN_DETECTION=false
+EXTRA_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --with-detection)
+      RUN_DETECTION=true
+      shift
+      ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
 
 RTMP_IMAGE="alfg/nginx-rtmp"
 RTMP_CONTAINER="kavi-rtmp"
 RTMP_PORT="1935"
-STREAM_URL_LOCAL="rtmp://localhost:${RTMP_PORT}/stream/dji"
+HLS_HTTP_PORT="8080"
+# Simple config: app "live", stream key = last path segment -> HLS at /live/STREAM_KEY/index.m3u8
+# Kavi UI expects stream key "djidji" by default (or set LIVE_STREAM_KEY); use same key in DJI Fly URL.
+NGINX_CONF="${SCRIPT_DIR}/nginx-rtmp-simple.conf"
+STREAM_KEY="${LIVE_STREAM_KEY:-djidji}"
+STREAM_URL_LOCAL="rtmp://localhost:${RTMP_PORT}/live/${STREAM_KEY}"
+HLS_STREAM_URL="http://localhost:${HLS_HTTP_PORT}/live/${STREAM_KEY}/index.m3u8"
 
 echo "=============================================="
-echo "  Kavi – DJI Air 3S live feed (Option 1)"
+echo "  Kavi – DJI Air 3S live video (UI only)"
 echo "=============================================="
 echo ""
 
@@ -26,8 +46,6 @@ echo ""
 if ! command -v docker &>/dev/null; then
   echo "Docker is not installed or not in PATH."
   echo "Install Docker Desktop from https://www.docker.com/products/docker-desktop/"
-  echo "Or start an RTMP server manually and run:"
-  echo "  python3.11 -m Model.main \"${STREAM_URL_LOCAL}\" --live $*"
   exit 1
 fi
 
@@ -36,23 +54,26 @@ if ! docker info &>/dev/null; then
   exit 1
 fi
 
-if docker ps -q -f "name=^${RTMP_CONTAINER}$" 2>/dev/null | grep -q .; then
-  echo "[OK] RTMP server already running (container: ${RTMP_CONTAINER})"
-elif docker ps -aq -f "name=^${RTMP_CONTAINER}$" 2>/dev/null | grep -q .; then
-  echo "Starting existing RTMP container..."
-  docker start "$RTMP_CONTAINER"
-  echo "[OK] RTMP server started"
-else
+# Use simple config (no FFmpeg exec) so HLS works reliably; recreate so our config is always used
+if [ ! -f "$NGINX_CONF" ]; then
+  echo "Error: Config not found: $NGINX_CONF"
+  exit 1
+fi
+
+docker rm -f "$RTMP_CONTAINER" 2>/dev/null || true
+if ! docker image inspect "$RTMP_IMAGE" >/dev/null 2>&1; then
   echo "Pulling RTMP image (one-time)..."
   docker pull "$RTMP_IMAGE"
-  echo "Starting RTMP server..."
-  docker run -d -p "${RTMP_PORT}:1935" --name "$RTMP_CONTAINER" "$RTMP_IMAGE"
-  echo "[OK] RTMP server running on port ${RTMP_PORT}"
 fi
+echo "Starting RTMP server (simple HLS, no FFmpeg exec)..."
+docker run -d -p "${RTMP_PORT}:1935" -p "${HLS_HTTP_PORT}:80" \
+  -v "${NGINX_CONF}:/etc/nginx/nginx.conf.template:ro" \
+  --name "$RTMP_CONTAINER" "$RTMP_IMAGE"
+echo "[OK] RTMP server running: port ${RTMP_PORT} (ingest), port ${HLS_HTTP_PORT} (HLS)"
 
 echo ""
 
-# 2. Show DJI Fly URL
+# 2. Show DJI Fly URL and UI instructions
 PC_IP=""
 if command -v ipconfig &>/dev/null; then
   PC_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
@@ -61,18 +82,29 @@ if [ -z "$PC_IP" ]; then
   PC_IP="YOUR_PC_IP"
 fi
 
-DJI_URL="rtmp://${PC_IP}:${RTMP_PORT}/stream/dji"
-echo "In DJI Fly (Transmission → RTMP), use this URL:"
+DJI_URL="rtmp://${PC_IP}:${RTMP_PORT}/live/${STREAM_KEY}"
+echo "1. In DJI Fly (Transmission → RTMP), set URL and tap Start:"
+echo "   $DJI_URL"
+echo "   (Stream key must match; Kavi Live tab uses \"${STREAM_KEY}\" by default.)"
 echo ""
-echo "  $DJI_URL"
+echo "2. On this Mac, start the Kavi UI and open the Live tab:"
+echo "   npm run dev"
+echo "   Then open http://localhost:3000 and click 'Live' in the header."
 echo ""
-echo "Then tap Start to begin streaming. Keep the stream running."
-echo ""
-
-# 3. Run Kavi
-echo "Starting Kavi on live stream..."
-echo "Stream URL: ${STREAM_URL_LOCAL}"
-echo "Press Ctrl+C to stop."
+echo "   The video will show in the Live tab while DJI Fly is streaming."
 echo ""
 
-exec python3.11 -m Model.main "$STREAM_URL_LOCAL" --live "$@"
+if [ "$RUN_DETECTION" = true ]; then
+  if python3.11 -c "import hf_transfer" 2>/dev/null; then
+    export HF_HUB_ENABLE_HF_TRANSFER=1
+  fi
+  echo "3. Starting Kavi detection on live stream (Ctrl+C to stop)..."
+  echo ""
+  exec python3.11 -m Model.main "$STREAM_URL_LOCAL" --live "${EXTRA_ARGS[@]}"
+else
+  echo "Model processing is disabled. To run detection on the stream, use:"
+  echo "   ./Model/run_dji_live_rtmp.sh --with-detection"
+  echo ""
+  echo "Server is running. Press Ctrl+C when you're done."
+  exec tail -f /dev/null
+fi
