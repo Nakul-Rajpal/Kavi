@@ -17,6 +17,10 @@ numpy>=1.24.0
 # API and Networking
 requests>=2.31.0
 websocket-client>=1.6.0
+supabase>=2.0.0
+
+# Environment Configuration
+python-dotenv>=1.0.0
 
 # Data Processing
 pandas>=2.0.0

@@ -27,17 +27,29 @@ import uuid
 import cv2
 import numpy as np
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from dataclasses import asdict
+from pathlib import Path
 
 from supabase import create_client, Client
-from gemini_analyzer import GeminiTicketAnalyzer, TicketAnalysis
+from .gemini_analyzer import GeminiTicketAnalyzer, TicketAnalysis
 
-# Supabase configuration
-SUPABASE_URL = "https://iofndonrjbuubyjlgilt.supabase.co"
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZm5kb25yamJ1dWJ5amxnaWx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4NjQ4OTYsImV4cCI6MjA4NTQ0MDg5Nn0._q9oE9ge2C1EDK5LTky4ySPvZHyQTqT243VddtbBEik"
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Look for .env in project root (parent of Model/)
+    env_path = Path(__file__).parent.parent / '.env'
+    load_dotenv(env_path)
+    print(f"[Config] Loaded environment from {env_path}")
+except ImportError:
+    pass  # dotenv not installed, use os.environ directly
+
+# Supabase configuration - read from environment variables
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://iofndonrjbuubyjlgilt.supabase.co")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZm5kb25yamJ1dWJ5amxnaWx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4NjQ4OTYsImV4cCI6MjA4NTQ0MDg5Nn0._q9oE9ge2C1EDK5LTky4ySPvZHyQTqT243VddtbBEik")
 
 # Default Gemini API key
-DEFAULT_GEMINI_KEY = "AIzaSyAtvs6rDMw17b4Eodt6bUHlSMzzi2dw6IE"
+DEFAULT_GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAtvs6rDMw17b4Eodt6bUHlSMzzi2dw6IE")
 
 STORAGE_BUCKET = "frames"
 
@@ -76,9 +88,15 @@ class SmartTicketCreator:
         Returns:
             Public URL of the uploaded image
         """
-        if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            unique_id = str(uuid.uuid4())[:8]
+        # Always generate a unique filename with timestamp to avoid duplicates
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        unique_id = str(uuid.uuid4())[:8]
+        
+        if filename:
+            # Add timestamp to provided filename to make it unique
+            base_name = filename.replace('.jpg', '').replace('.jpeg', '')
+            filename = f"{base_name}_{timestamp}_{unique_id}.jpg"
+        else:
             filename = f"detection_{timestamp}_{unique_id}.jpg"
         
         # Encode frame to JPEG bytes
@@ -218,26 +236,44 @@ class TicketCreator:
     def __init__(self, supabase_url: str = None, supabase_key: str = None):
         self.supabase_url = supabase_url or SUPABASE_URL
         self.supabase_key = supabase_key or SUPABASE_ANON_KEY
+        print(f"[TicketCreator] Connecting to Supabase: {self.supabase_url}")
         self.client: Client = create_client(self.supabase_url, self.supabase_key)
+        print(f"[TicketCreator] Connected successfully")
 
     def upload_frame(self, frame: np.ndarray, filename: str = None) -> str:
-        if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            unique_id = str(uuid.uuid4())[:8]
+        # Always generate a unique filename with timestamp to avoid duplicates
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        unique_id = str(uuid.uuid4())[:8]
+        
+        if filename:
+            # Add timestamp to provided filename to make it unique
+            base_name = filename.replace('.jpg', '').replace('.jpeg', '')
+            filename = f"{base_name}_{timestamp}_{unique_id}.jpg"
+        else:
             filename = f"frame_{timestamp}_{unique_id}.jpg"
         
+        print(f"[SUPABASE] Uploading frame: {filename}")
         success, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if not success:
             raise ValueError("Failed to encode frame to JPEG")
         
         image_bytes = buffer.tobytes()
-        self.client.storage.from_(STORAGE_BUCKET).upload(
-            path=filename,
-            file=image_bytes,
-            file_options={"content-type": "image/jpeg"}
-        )
+        print(f"[SUPABASE] Frame size: {len(image_bytes)} bytes")
         
-        return self.client.storage.from_(STORAGE_BUCKET).get_public_url(filename)
+        try:
+            self.client.storage.from_(STORAGE_BUCKET).upload(
+                path=filename,
+                file=image_bytes,
+                file_options={"content-type": "image/jpeg"}
+            )
+            print(f"[SUPABASE] Upload successful!")
+        except Exception as e:
+            print(f"[SUPABASE] Upload error: {e}")
+            raise
+        
+        url = self.client.storage.from_(STORAGE_BUCKET).get_public_url(filename)
+        print(f"[SUPABASE] Public URL: {url}")
+        return url
 
     def create_ticket(
         self,
@@ -247,6 +283,12 @@ class TicketCreator:
         ticket_data: dict,
         filename: str = None
     ) -> dict:
+        print(f"\n{'='*50}")
+        print(f"[SUPABASE] CREATING TICKET")
+        print(f"{'='*50}")
+        print(f"[SUPABASE] Location: ({lat}, {lng})")
+        print(f"[SUPABASE] Ticket data: {ticket_data}")
+        
         image_url = self.upload_frame(frame, filename)
         
         record = {
@@ -260,13 +302,31 @@ class TicketCreator:
             "effort_minutes": ticket_data.get("effort_minutes"),
             "status": ticket_data.get("status", "new"),
         }
+        # Note: 'label' field removed - doesn't exist in database schema
         
         record = {k: v for k, v in record.items() if v is not None}
-        result = self.client.table("pings").insert(record).execute()
         
-        if result.data:
-            return result.data[0]
-        raise Exception("Failed to create ticket")
+        print(f"[SUPABASE] Inserting into 'pings' table...")
+        print(f"[SUPABASE] Record: {record}")
+        
+        try:
+            result = self.client.table("pings").insert(record).execute()
+            
+            if result.data:
+                ticket = result.data[0]
+                print(f"[SUPABASE] SUCCESS! Ticket created:")
+                print(f"  ID: {ticket.get('id')}")
+                print(f"  Type: {ticket.get('type')}")
+                print(f"  Label: {ticket.get('label')}")
+                print(f"  Status: {ticket.get('status')}")
+                print(f"{'='*50}\n")
+                return ticket
+            else:
+                print(f"[SUPABASE] ERROR: No data returned from insert")
+                raise Exception("Failed to create ticket - no data returned")
+        except Exception as e:
+            print(f"[SUPABASE] ERROR inserting ticket: {e}")
+            raise
 
 
 if __name__ == "__main__":

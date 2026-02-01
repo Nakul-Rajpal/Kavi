@@ -15,9 +15,15 @@ import queue
 
 
 def _is_stream_url(source: str) -> bool:
-    """Return True if source is an RTSP or RTMP stream URL."""
+    """Return True if source is a live stream URL (RTSP, RTMP, or HLS)."""
     s = (source or "").strip().lower()
-    return s.startswith("rtsp://") or s.startswith("rtmp://")
+    # Support RTSP, RTMP, and HLS (.m3u8) streams
+    if s.startswith("rtsp://") or s.startswith("rtmp://"):
+        return True
+    # HLS streams are HTTP URLs ending in .m3u8
+    if (s.startswith("http://") or s.startswith("https://")) and ".m3u8" in s:
+        return True
+    return False
 
 
 # OpenCV's FFmpeg backend uses a ~30s timeout when no data is received.

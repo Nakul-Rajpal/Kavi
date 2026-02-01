@@ -95,12 +95,18 @@ echo "   The video will show in the Live tab while DJI Fly is streaming."
 echo ""
 
 if [ "$RUN_DETECTION" = true ]; then
-  if python3.11 -c "import hf_transfer" 2>/dev/null; then
+  if python3 -c "import hf_transfer" 2>/dev/null; then
     export HF_HUB_ENABLE_HF_TRANSFER=1
   fi
   echo "3. Starting Kavi detection on live stream (Ctrl+C to stop)..."
+  echo "   Using HLS stream: $HLS_STREAM_URL"
+  echo "   Tickets will be created in Supabase automatically"
   echo ""
-  exec python3.11 -m Model.main "$STREAM_URL_LOCAL" --live "${EXTRA_ARGS[@]}"
+  echo "   TIP: To set a default location for testing without GPS:"
+  echo "   ./Model/run_dji_live_rtmp.sh --with-detection --default-lat 41.8262 --default-lng -71.4035"
+  echo ""
+  # Use HLS stream URL instead of RTMP - OpenCV handles HLS much more reliably
+  exec python3 -m Model.main "$HLS_STREAM_URL" --live "${EXTRA_ARGS[@]}"
 else
   echo "Model processing is disabled. To run detection on the stream, use:"
   echo "   ./Model/run_dji_live_rtmp.sh --with-detection"
