@@ -5,7 +5,6 @@ SAM3-based pothole detection from drone footage
 
 from .sam3_model import SAM3Model, SAM3PotholeDetector
 from .video_processor import VideoProcessor, FrameProcessor
-from .telemetry_handler import TelemetryHandler, TelemetryData
 from .pothole_detector import PotholeDetectionPipeline, PotholeDetection
 from .results_reporter import (
     ResultsReporter,
@@ -17,7 +16,6 @@ from .config import (
     ModelConfig,
     VideoConfig,
     DetectionConfig,
-    TelemetryConfig,
     ReportingConfig,
     PipelineConfig,
     DEFAULT_CONFIG
@@ -34,10 +32,6 @@ __all__ = [
     'VideoProcessor',
     'FrameProcessor',
 
-    # Telemetry
-    'TelemetryHandler',
-    'TelemetryData',
-
     # Detection Pipeline
     'PotholeDetectionPipeline',
     'PotholeDetection',
@@ -52,7 +46,6 @@ __all__ = [
     'ModelConfig',
     'VideoConfig',
     'DetectionConfig',
-    'TelemetryConfig',
     'ReportingConfig',
     'PipelineConfig',
     'DEFAULT_CONFIG',

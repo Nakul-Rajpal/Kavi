@@ -1,6 +1,6 @@
 """
 Complete Pothole Detection Pipeline
-Integrates SAM3, video processing, telemetry handling, and deduplication
+Integrates SAM3, video processing, and deduplication
 """
 
 import numpy as np
@@ -11,7 +11,6 @@ import json
 
 from .sam3_model import SAM3Model, SAM3PotholeDetector
 from .video_processor import VideoProcessor, FrameProcessor
-from .telemetry_handler import TelemetryHandler, TelemetryData
 from .deduplication import PotholeTracker
 
 
@@ -24,7 +23,6 @@ class PotholeDetection:
     confidence: float
     bbox: List[float]  # [x, y, w, h]
     area: float
-    telemetry: Optional[Dict] = None
     image_path: Optional[str] = None
 
     def to_dict(self) -> Dict:
@@ -43,7 +41,6 @@ class PotholeDetectionPipeline:
         self,
         sam_model: SAM3Model,
         video_source: str,
-        telemetry_file: Optional[str] = None,
         confidence_threshold: float = 0.5,
         process_every_n_frames: int = 1,
         enable_deduplication: bool = True,
@@ -57,7 +54,6 @@ class PotholeDetectionPipeline:
         Args:
             sam_model: Initialized SAM3Model
             video_source: Path to video file or camera index
-            telemetry_file: Path to telemetry data file
             confidence_threshold: Minimum confidence for pothole detection
             process_every_n_frames: Process every Nth frame (1 = process all frames)
             enable_deduplication: Whether to deduplicate detections across frames
@@ -68,7 +64,6 @@ class PotholeDetectionPipeline:
         self.sam_detector = SAM3PotholeDetector(sam_model)
         self.video_processor = VideoProcessor(video_source)
         self.frame_processor = FrameProcessor()
-        self.telemetry_handler = TelemetryHandler(telemetry_file)
 
         self.confidence_threshold = confidence_threshold
         self.process_every_n_frames = process_every_n_frames
@@ -132,9 +127,6 @@ class PotholeDetectionPipeline:
             # Track raw detection count
             self.total_raw_detections += len(potholes)
 
-            # Get telemetry for this frame
-            telemetry = self.telemetry_handler.interpolate_telemetry(frame_num)
-
             # Apply deduplication if enabled
             if self.enable_deduplication and self.tracker:
                 # Only get NEW unique potholes (not seen before)
@@ -144,8 +136,7 @@ class PotholeDetectionPipeline:
                 for pothole in unique_potholes:
                     detection = self._create_detection(
                         frame_num=frame_num,
-                        pothole=pothole,
-                        telemetry=telemetry
+                        pothole=pothole
                     )
                     self.detections.append(detection)
             else:
@@ -153,8 +144,7 @@ class PotholeDetectionPipeline:
                 for pothole in potholes:
                     detection = self._create_detection(
                         frame_num=frame_num,
-                        pothole=pothole,
-                        telemetry=telemetry
+                        pothole=pothole
                     )
                     self.detections.append(detection)
 
@@ -233,9 +223,6 @@ class PotholeDetectionPipeline:
                 # Track raw detections
                 self.total_raw_detections += len(potholes)
 
-                # Get telemetry (if available via live stream)
-                telemetry = self.telemetry_handler.get_telemetry(frame_count)
-
                 # Apply deduplication if enabled
                 frame_detections = []
                 
@@ -246,8 +233,7 @@ class PotholeDetectionPipeline:
                     for pothole in unique_potholes:
                         detection = self._create_detection(
                             frame_num=frame_count,
-                            pothole=pothole,
-                            telemetry=telemetry
+                            pothole=pothole
                         )
                         frame_detections.append(detection)
                         self.detections.append(detection)
@@ -256,8 +242,7 @@ class PotholeDetectionPipeline:
                     for pothole in potholes:
                         detection = self._create_detection(
                             frame_num=frame_count,
-                            pothole=pothole,
-                            telemetry=telemetry
+                            pothole=pothole
                         )
                         frame_detections.append(detection)
                         self.detections.append(detection)
@@ -291,8 +276,7 @@ class PotholeDetectionPipeline:
     def _create_detection(
         self,
         frame_num: int,
-        pothole: Dict,
-        telemetry: Optional[TelemetryData]
+        pothole: Dict
     ) -> PotholeDetection:
         """
         Create detection result object
@@ -300,7 +284,6 @@ class PotholeDetectionPipeline:
         Args:
             frame_num: Frame number
             pothole: Pothole detection dictionary
-            telemetry: Telemetry data for this frame
 
         Returns:
             PotholeDetection object
@@ -313,8 +296,7 @@ class PotholeDetectionPipeline:
             timestamp=datetime.now().timestamp(),
             confidence=pothole['confidence'],
             bbox=pothole['bbox'],
-            area=pothole['area'],
-            telemetry=telemetry.to_dict() if telemetry else None
+            area=pothole['area']
         )
 
         return detection
@@ -337,9 +319,6 @@ class PotholeDetectionPipeline:
 
         frames_with_potholes = len(set(d.frame_number for d in self.detections))
         avg_confidence = np.mean([d.confidence for d in self.detections])
-
-        # Group by location if telemetry available
-        detections_with_gps = [d for d in self.detections if d.telemetry and d.telemetry.get('latitude')]
         
         # Calculate deduplication ratio
         dedup_ratio = self.total_raw_detections / max(len(self.detections), 1)
@@ -351,7 +330,6 @@ class PotholeDetectionPipeline:
             'deduplication_enabled': self.enable_deduplication,
             'frames_with_potholes': frames_with_potholes,
             'average_confidence': float(avg_confidence),
-            'detections_with_gps': len(detections_with_gps),
             'confidence_distribution': {
                 'high (>0.8)': len([d for d in self.detections if d.confidence > 0.8]),
                 'medium (0.5-0.8)': len([d for d in self.detections if 0.5 <= d.confidence <= 0.8]),
@@ -388,8 +366,7 @@ class PotholeDetectionPipeline:
                 return
 
             fieldnames = ['detection_id', 'frame_number', 'timestamp', 'confidence',
-                         'bbox_x', 'bbox_y', 'bbox_w', 'bbox_h', 'area',
-                         'latitude', 'longitude', 'altitude']
+                         'bbox_x', 'bbox_y', 'bbox_w', 'bbox_h', 'area']
 
             with open(output_file, 'w', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -405,10 +382,7 @@ class PotholeDetectionPipeline:
                         'bbox_y': detection.bbox[1],
                         'bbox_w': detection.bbox[2],
                         'bbox_h': detection.bbox[3],
-                        'area': detection.area,
-                        'latitude': detection.telemetry.get('latitude') if detection.telemetry else None,
-                        'longitude': detection.telemetry.get('longitude') if detection.telemetry else None,
-                        'altitude': detection.telemetry.get('altitude') if detection.telemetry else None
+                        'area': detection.area
                     }
                     writer.writerow(row)
 

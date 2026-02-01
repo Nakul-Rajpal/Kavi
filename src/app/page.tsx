@@ -7,6 +7,7 @@ import GlassPanel from "@/components/GlassPanel";
 import Timeline from "@/components/Timeline";
 import FilterMenu, { IssueTypeId } from "@/components/FilterMenu";
 import DetectionsSidebar from "@/components/DetectionsSidebar";
+import CitySummary from "@/components/CitySummary";
 import { AnimatePresence } from "framer-motion";
 import { Ping } from "@/lib/supabase";
 
@@ -76,6 +77,9 @@ export default function Dashboard() {
           showTimeline={showTimeline}
           setShowTimeline={setShowTimeline}
         />
+
+        {/* City Health Summary Dropdown */}
+        <CitySummary pings={pings} />
 
         {/* Detections Sidebar - now with real data */}
         <DetectionsSidebar pings={pings} connectionStatus={connectionStatus} />

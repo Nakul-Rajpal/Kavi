@@ -1,7 +1,7 @@
 """
 Main entry point for SAM3 Video-based Pothole Detection
 Uses native video tracking instead of frame-by-frame with deduplication
-Outputs CSV with telemetry data and saves frame images
+Outputs CSV and saves frame images
 """
 
 import argparse
@@ -40,7 +40,6 @@ def process_video_with_tracking(
     
     # Import here to avoid slow startup for help/version
     from .sam3_video_model import SAM3VideoModel, SAM3VideoPotholeDetector
-    from .telemetry_handler import TelemetryHandler
     
     # Initialize model
     print("\n1. Loading SAM3 Video models...")
@@ -71,29 +70,7 @@ def process_video_with_tracking(
         frame_skip=frame_skip
     )
     
-    # Extract telemetry from video
-    print("\n3. Extracting telemetry from video...")
-    telemetry_handler = TelemetryHandler()
     fps = results.get('fps', 30.0)
-    
-    # Try to extract telemetry from embedded subtitles in MP4
-    telemetry_loaded = telemetry_handler.load_from_mp4(video_path, fps=fps)
-    
-    if not telemetry_loaded:
-        # Try to find external SRT file
-        video_file = Path(video_path)
-        srt_path = video_file.with_suffix('.SRT')
-        if not srt_path.exists():
-            srt_path = video_file.with_suffix('.srt')
-        
-        if srt_path.exists():
-            print(f"   Found external SRT file: {srt_path}")
-            telemetry_handler.load_telemetry_file(str(srt_path))
-        else:
-            print("   No telemetry data found (no embedded subtitles or SRT file)")
-    
-    telemetry_count = len(telemetry_handler.telemetry_data)
-    print(f"   Telemetry entries available: {telemetry_count}")
     
     # Print summary
     print("\n" + "=" * 60)
@@ -101,7 +78,6 @@ def process_video_with_tracking(
     print("=" * 60)
     print(f"Video frames processed: {results['num_frames']}")
     print(f"Unique potholes found: {results['unique_potholes']}")
-    print(f"Telemetry points: {telemetry_count}")
     
     if results['potholes']:
         print("\nDetected potholes:")
@@ -112,12 +88,11 @@ def process_video_with_tracking(
             if p.get('image_filename'):
                 print(f"    Image: {p['image_filename']}")
     
-    # Save CSV with telemetry data
+    # Save CSV
     csv_file = session_dir / "detections.csv"
     csv_fieldnames = [
         'pothole_id', 'confidence', 'frame_number', 'original_frame_number',
         'frames_visible', 'bbox_x', 'bbox_y', 'bbox_w', 'bbox_h',
-        'latitude', 'longitude', 'altitude', 'speed',
         'image_filename'
     ]
     
@@ -126,10 +101,7 @@ def process_video_with_tracking(
         writer.writeheader()
         
         for p in results['potholes']:
-            # Get telemetry for this detection's frame
             original_frame = p.get('original_frame_number', p['first_frame'])
-            telemetry = telemetry_handler.get_telemetry_for_frame(original_frame, fps=fps)
-            
             bbox = p.get('initial_bbox', [0, 0, 0, 0])
             
             row = {
@@ -142,10 +114,6 @@ def process_video_with_tracking(
                 'bbox_y': round(bbox[1], 2) if bbox else 0,
                 'bbox_w': round(bbox[2], 2) if bbox else 0,
                 'bbox_h': round(bbox[3], 2) if bbox else 0,
-                'latitude': telemetry.latitude if telemetry else None,
-                'longitude': telemetry.longitude if telemetry else None,
-                'altitude': telemetry.altitude if telemetry else None,
-                'speed': telemetry.speed if telemetry else None,
                 'image_filename': p.get('image_filename', '')
             }
             writer.writerow(row)
@@ -162,7 +130,6 @@ def process_video_with_tracking(
         'unique_potholes': results['unique_potholes'],
         'fps': fps,
         'potholes': results['potholes'],
-        'telemetry_count': telemetry_count,
         'timestamp': timestamp
     }
     
@@ -173,7 +140,7 @@ def process_video_with_tracking(
     print("=" * 60)
     print("\nProcessing complete!")
     print(f"\nOutput files in {session_dir}:")
-    print(f"  - detections.csv (with GPS telemetry)")
+    print(f"  - detections.csv")
     print(f"  - detections.json")
     print(f"  - frames/ (annotated detection images)")
     
@@ -201,7 +168,6 @@ def process_video_batch(
         frame_skip: Process every Nth frame
     """
     from .sam3_video_model import SAM3VideoModel, SAM3VideoPotholeDetector
-    from .telemetry_handler import TelemetryHandler
     
     print("=" * 60)
     print("Kavi Pothole Detection - BATCH MODE")
@@ -244,18 +210,13 @@ def process_video_batch(
             frame_skip=frame_skip
         )
         
-        # Extract telemetry
-        telemetry_handler = TelemetryHandler()
         fps = results.get('fps', 30.0)
-        telemetry_handler.load_from_mp4(video_path, fps=fps)
-        telemetry_count = len(telemetry_handler.telemetry_data)
         
         # Save CSV
         csv_file = session_dir / "detections.csv"
         csv_fieldnames = [
             'pothole_id', 'confidence', 'frame_number', 'original_frame_number',
             'frames_visible', 'bbox_x', 'bbox_y', 'bbox_w', 'bbox_h',
-            'latitude', 'longitude', 'altitude', 'speed',
             'image_filename'
         ]
         
@@ -265,7 +226,6 @@ def process_video_batch(
             
             for p in results['potholes']:
                 original_frame = p.get('original_frame_number', p['first_frame'])
-                telemetry = telemetry_handler.get_telemetry_for_frame(original_frame, fps=fps)
                 bbox = p.get('initial_bbox', [0, 0, 0, 0])
                 
                 row = {
@@ -278,10 +238,6 @@ def process_video_batch(
                     'bbox_y': round(bbox[1], 2) if bbox else 0,
                     'bbox_w': round(bbox[2], 2) if bbox else 0,
                     'bbox_h': round(bbox[3], 2) if bbox else 0,
-                    'latitude': telemetry.latitude if telemetry else None,
-                    'longitude': telemetry.longitude if telemetry else None,
-                    'altitude': telemetry.altitude if telemetry else None,
-                    'speed': telemetry.speed if telemetry else None,
                     'image_filename': p.get('image_filename', '')
                 }
                 writer.writerow(row)
@@ -294,7 +250,6 @@ def process_video_batch(
             'unique_potholes': results['unique_potholes'],
             'fps': fps,
             'potholes': results['potholes'],
-            'telemetry_count': telemetry_count,
             'timestamp': timestamp
         }
         

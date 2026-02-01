@@ -37,14 +37,6 @@ class DetectionConfig:
 
 
 @dataclass
-class TelemetryConfig:
-    """Telemetry data configuration"""
-    telemetry_file: Optional[str] = None
-    telemetry_format: str = "srt"  # srt, csv, or json
-    enable_interpolation: bool = True  # Interpolate missing telemetry
-
-
-@dataclass
 class ReportingConfig:
     """Results reporting configuration"""
     api_endpoint: Optional[str] = None
@@ -72,7 +64,6 @@ class PipelineConfig:
     model: ModelConfig
     video: VideoConfig
     detection: DetectionConfig
-    telemetry: TelemetryConfig
     reporting: ReportingConfig
     deduplication: DeduplicationConfig
 
@@ -83,7 +74,6 @@ class PipelineConfig:
             model=ModelConfig(),
             video=VideoConfig(),
             detection=DetectionConfig(),
-            telemetry=TelemetryConfig(),
             reporting=ReportingConfig(),
             deduplication=DeduplicationConfig()
         )
@@ -103,9 +93,6 @@ class PipelineConfig:
             ),
             detection=DetectionConfig(
                 confidence_threshold=float(os.getenv('CONFIDENCE_THRESHOLD', '0.5'))
-            ),
-            telemetry=TelemetryConfig(
-                telemetry_file=os.getenv('TELEMETRY_FILE')
             ),
             reporting=ReportingConfig(
                 api_endpoint=os.getenv('API_ENDPOINT'),

@@ -27,8 +27,7 @@ import uuid
 import cv2
 import numpy as np
 from datetime import datetime
-from typing import Dict, Any, Optional
-from dataclasses import asdict
+from typing import Dict, Any
 
 from supabase import create_client, Client
 from gemini_analyzer import GeminiTicketAnalyzer, TicketAnalysis
