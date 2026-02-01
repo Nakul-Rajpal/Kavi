@@ -242,7 +242,7 @@ def main():
     parser.add_argument(
         'video_source',
         type=str,
-        help='Video file path, camera index (e.g. 0), or live stream URL (rtsp://... or rtmp://... for DJI Air 3S etc.)'
+        help='Video file path, camera index (e.g. 0), or live stream URL (rtsp://, rtmp://, or HLS http://...m3u8)'
     )
 
     parser.add_argument(
@@ -297,7 +297,7 @@ def main():
     parser.add_argument(
         '--live',
         action='store_true',
-        help='Process live video stream (camera index or RTSP/RTMP URL). See DJI_AIR_3S_SETUP.md for DJI drone setup.'
+        help='Process live video stream (camera index, RTSP/RTMP URL, or HLS .m3u8 URL). See DJI_AIR_3S_SETUP.md for setup.'
     )
 
     args = parser.parse_args()
@@ -307,7 +307,7 @@ def main():
         if not Path(args.video_source).exists():
             print(f"Error: Video file not found: {args.video_source}")
             sys.exit(1)
-    # For --live: video_source can be camera index ("0") or stream URL (rtsp://... or rtmp://...)
+    # For --live: video_source can be camera index ("0") or stream URL (rtsp://, rtmp://, or HLS .m3u8)
 
     # Run appropriate mode
     if args.live:

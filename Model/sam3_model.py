@@ -78,7 +78,8 @@ class SAM3Model:
         self,
         image: Union[np.ndarray, Image.Image],
         text_prompts: Union[str, List[str]],
-        threshold: float = 0.5
+        threshold: float = 0.5,
+        verbose: bool = False
     ) -> List[Dict]:
         """
         Detect objects using text prompts (SAM3's main feature!)
@@ -88,6 +89,7 @@ class SAM3Model:
             text_prompts: Text description(s) of what to detect
                          e.g., "pothole", ["pothole", "road damage", "asphalt crack"]
             threshold: Confidence threshold for detection
+            verbose: Enable detailed logging
 
         Returns:
             List of detection results with masks, boxes, and scores
@@ -107,6 +109,10 @@ class SAM3Model:
         # and the DETR encoder expects a single 32-token sequence. Use one prompt per call.
         text_for_processor = text_prompts[0] if text_prompts else "object"
 
+        if verbose:
+            print(f"\n      [MODEL] Using prompt: '{text_for_processor}'")
+            print(f"      [MODEL] Image size: {image.width}x{image.height}")
+
         # Process inputs (processor adds original_sizes for post-processing)
         inputs = self.processor(
             images=image,
@@ -117,9 +123,15 @@ class SAM3Model:
         target_sizes_raw = inputs.pop("original_sizes", None)
         inputs = {k: v.to(self.device) if hasattr(v, 'to') else v for k, v in inputs.items()}
 
+        if verbose:
+            print(f"      [MODEL] Running inference on {self.device}...")
+
         # Run inference
         with torch.no_grad():
             outputs = self.model(**inputs)
+
+        if verbose:
+            print(f"      [MODEL] Inference complete, post-processing...")
 
         # Post-process (official API: post_process_instance_segmentation)
         target_sizes = target_sizes_raw
@@ -139,6 +151,14 @@ class SAM3Model:
         scores = results.get("scores", results.get("score", []))
         masks = results.get("masks", [])
         boxes = results.get("boxes", [])
+        
+        if verbose:
+            print(f"      [MODEL] Raw output: {len(scores) if hasattr(scores, '__len__') else 1} scores")
+            if hasattr(scores, "__len__") and len(scores) > 0:
+                for idx, s in enumerate(scores[:5]):  # Show first 5
+                    sc_val = s.item() if hasattr(s, "item") else float(s)
+                    print(f"        Score[{idx}]: {sc_val:.4f} (threshold: {threshold})")
+        
         if not hasattr(scores, "__len__"):
             scores = [scores]
         if not hasattr(masks, "__len__"):
@@ -162,6 +182,9 @@ class SAM3Model:
                     'confidence': sc,
                     'label': text_prompts[0] if text_prompts else "object"
                 })
+
+        if verbose:
+            print(f"      [MODEL] Returning {len(detections)} detections above threshold")
 
         return detections
 
@@ -242,7 +265,8 @@ class SAM3PotholeDetector:
         self,
         image: np.ndarray,
         confidence_threshold: float = 0.5,
-        custom_prompts: Optional[List[str]] = None
+        custom_prompts: Optional[List[str]] = None,
+        verbose: bool = False
     ) -> List[Dict]:
         """
         Detect potholes in image using SAM3 text prompts
@@ -251,6 +275,7 @@ class SAM3PotholeDetector:
             image: Input image (RGB format)
             confidence_threshold: Minimum confidence for pothole detection
             custom_prompts: Optional custom text prompts to use
+            verbose: Enable detailed logging
 
         Returns:
             List of detected potholes with masks and metadata
@@ -258,12 +283,23 @@ class SAM3PotholeDetector:
         # Use custom prompts if provided, otherwise use defaults
         prompts = custom_prompts or self.pothole_prompts
 
+        if verbose:
+            print(f"    [SAM3] Image shape: {image.shape}")
+            print(f"    [SAM3] Using prompts: {prompts}")
+            print(f"    [SAM3] Threshold: {confidence_threshold}")
+
         # Detect using text prompts - SAM3's superpower!
         detections = self.sam_model.detect_with_text(
             image=image,
             text_prompts=prompts,
-            threshold=confidence_threshold
+            threshold=confidence_threshold,
+            verbose=verbose
         )
+
+        if verbose:
+            print(f"    [SAM3] Raw detections from model: {len(detections)}")
+            for i, d in enumerate(detections):
+                print(f"      [{i+1}] conf={d.get('confidence', 'N/A')}, bbox={d.get('bbox', 'N/A')}")
 
         # Enhance detections with additional features
         enhanced_detections = []
@@ -277,6 +313,11 @@ class SAM3PotholeDetector:
             # Apply additional filtering if needed
             if self._is_valid_pothole(detection):
                 enhanced_detections.append(detection)
+            elif verbose:
+                print(f"      Filtered out detection (failed _is_valid_pothole)")
+
+        if verbose:
+            print(f"    [SAM3] After filtering: {len(enhanced_detections)} valid detections")
 
         return enhanced_detections
 

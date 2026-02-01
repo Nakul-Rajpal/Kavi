@@ -198,6 +198,8 @@ class PotholeDetectionPipeline:
             output_dir: Directory to save frames with detections
         """
         print("Starting live video processing...")
+        print(f"  Confidence threshold: {self.confidence_threshold}")
+        print(f"  Process every {self.process_every_n_frames} frame(s)")
         if self.enable_deduplication:
             print("Deduplication ENABLED (IoU-based tracking)")
             
@@ -208,27 +210,58 @@ class PotholeDetectionPipeline:
 
         try:
             frame_count = 0
+            frames_processed = 0
+            null_frame_count = 0
+            last_log_frame = 0
+            
             while True:
                 # Get next frame
                 frame = self.video_processor.get_frame(timeout=1.0)
 
                 if frame is None:
+                    null_frame_count += 1
+                    if null_frame_count % 10 == 0:
+                        print(f"[DEBUG] Waiting for frames... ({null_frame_count} timeouts)")
                     continue
+                
+                null_frame_count = 0  # Reset on successful frame
 
                 # Process only every N frames
                 if frame_count % self.process_every_n_frames != 0:
                     frame_count += 1
                     continue
 
+                frames_processed += 1
+                
+                # Log progress every 10 processed frames
+                if frames_processed % 10 == 1:
+                    print(f"[CHECKPOINT] Processing frame {frame_count} (processed: {frames_processed})")
+                    print(f"  Frame shape: {frame.shape}")
+
                 # Preprocess frame
                 preprocessed = self.frame_processor.preprocess_frame(frame)
                 enhanced = self.frame_processor.enhance_frame(preprocessed)
+                
+                if frames_processed % 10 == 1:
+                    print(f"  Preprocessed shape: {preprocessed.shape}, Enhanced shape: {enhanced.shape}")
 
                 # Detect potholes
+                print(f"[DETECT] Running SAM3 on frame {frame_count}...", end=" ", flush=True)
+                # Enable verbose logging for first 3 processed frames
+                verbose_mode = frames_processed <= 3
                 potholes = self.sam_detector.detect_potholes(
                     enhanced,
-                    confidence_threshold=self.confidence_threshold
+                    confidence_threshold=self.confidence_threshold,
+                    verbose=verbose_mode
                 )
+                print(f"Found {len(potholes)} raw detections")
+                
+                # Log detection details
+                if potholes:
+                    for i, p in enumerate(potholes):
+                        conf = p.get('confidence', 0)
+                        bbox = p.get('bbox', [])
+                        print(f"  [DETECTION {i+1}] conf={conf:.3f}, bbox={bbox}")
                 
                 # Track raw detections
                 self.total_raw_detections += len(potholes)
@@ -281,12 +314,15 @@ class PotholeDetectionPipeline:
             print("\nStopping live processing...")
         finally:
             self.video_processor.stop_live_capture()
+            print(f"\n[SUMMARY] Live processing complete:")
+            print(f"  Total frames received: {frame_count}")
+            print(f"  Frames actually processed: {frames_processed}")
+            print(f"  Process every N frames: {self.process_every_n_frames}")
             if self.enable_deduplication:
-                print(f"Processed {frame_count} frames")
                 print(f"  Raw detections: {self.total_raw_detections}")
                 print(f"  Unique potholes: {len(self.detections)}")
             else:
-                print(f"Processed {frame_count} frames, found {len(self.detections)} potholes")
+                print(f"  Total detections: {len(self.detections)}")
 
     def _create_detection(
         self,
