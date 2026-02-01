@@ -6,6 +6,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { getSupabase, Ping } from "@/lib/supabase";
 import { IssueTypeId } from "./FilterMenu";
 import { TIME_RANGES } from "./Timeline";
+import DroneFlightPath from "./DroneFlightPath";
+import { Route } from "lucide-react";
 
 // Debug logging
 const DEBUG = false;
@@ -172,6 +174,7 @@ export default function Map3D({ isLive, timeRange, onPingsUpdate, activeFilters 
   const [latestPing, setLatestPing] = useState<Ping | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [hoveredPingId, setHoveredPingId] = useState<string | null>(null);
+  const [showFlightPath, setShowFlightPath] = useState(false);
   const pingIdsRef = useRef(new Set<string>());
   const mapRef = useRef<any>(null);
 
@@ -471,8 +474,64 @@ export default function Map3D({ isLive, timeRange, onPingsUpdate, activeFilters 
           </Popup>
         )}
 
+        {/* Drone Flight Path Overlay */}
+        <DroneFlightPath 
+          isVisible={showFlightPath} 
+          onToggle={() => setShowFlightPath(false)} 
+        />
+
         <NavigationControl position="bottom-left" showCompass={true} />
       </Map>
+
+      {/* Flight Path Toggle Button */}
+      <button
+        onClick={() => setShowFlightPath(!showFlightPath)}
+        style={{
+          position: "absolute",
+          bottom: "24px",
+          right: "24px",
+          width: "52px",
+          height: "52px",
+          borderRadius: "16px",
+          background: showFlightPath 
+            ? "linear-gradient(135deg, #00F3FF 0%, #00B4D8 100%)" 
+            : "rgba(0, 0, 0, 0.8)",
+          backdropFilter: "blur(12px)",
+          border: showFlightPath ? "none" : "1px solid rgba(255, 255, 255, 0.15)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          zIndex: 400,
+          boxShadow: showFlightPath 
+            ? "0 0 30px rgba(0, 243, 255, 0.5)" 
+            : "0 8px 32px rgba(0, 0, 0, 0.4)",
+          transition: "all 0.3s ease",
+        }}
+        title={showFlightPath ? "Hide Flight Path" : "Show Flight Path"}
+        onMouseEnter={(e) => {
+          if (!showFlightPath) {
+            e.currentTarget.style.background = "rgba(0, 243, 255, 0.15)";
+            e.currentTarget.style.borderColor = "rgba(0, 243, 255, 0.4)";
+          }
+          e.currentTarget.style.transform = "scale(1.08)";
+        }}
+        onMouseLeave={(e) => {
+          if (!showFlightPath) {
+            e.currentTarget.style.background = "rgba(0, 0, 0, 0.8)";
+            e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.15)";
+          }
+          e.currentTarget.style.transform = "scale(1)";
+        }}
+      >
+        <Route 
+          size={22} 
+          style={{ 
+            color: showFlightPath ? "white" : "#00F3FF",
+            filter: showFlightPath ? "none" : "drop-shadow(0 0 6px #00F3FF)",
+          }} 
+        />
+      </button>
 
       {/* Vignette overlay */}
       <div

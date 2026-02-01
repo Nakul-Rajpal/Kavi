@@ -108,6 +108,27 @@ body {
   }
 }
 
+@keyframes drone-fly {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-2px) rotate(1deg);
+  }
+  75% {
+    transform: translateY(2px) rotate(-1deg);
+  }
+}
+
+@keyframes path-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(0, 243, 255, 0.6));
+  }
+  50% {
+    filter: drop-shadow(0 0 16px rgba(0, 243, 255, 0.9));
+  }
+}
+
 /* ===== GLASS PANEL STYLING ===== */
 
 .glass-panel {
