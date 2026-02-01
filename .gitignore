@@ -55,6 +55,7 @@ Model/results/
 results/
 results_dedup/
 results_dedup2/
+results_video/
 
 # Drone / video footage (large files)
 footage/
