@@ -187,10 +187,13 @@ class SAM3VideoModel:
         text_prompts: List[str] = ["pothole", "road damage"],
         detection_threshold: float = 0.5,
         detection_frame_interval: int = 30,
-        output_dir: Optional[str] = None
+        output_dir: Optional[str] = None,
+        max_frames: int = 300,
+        frame_skip: int = 5
     ) -> Dict:
         """
-        Process entire video for pothole detection using video tracking.
+        Process entire video for pothole detection.
+        Runs detection on ALL frames and deduplicates to find unique potholes.
         
         Args:
             video_path: Path to video file
@@ -198,118 +201,109 @@ class SAM3VideoModel:
             detection_threshold: Confidence threshold for detection
             detection_frame_interval: Run text detection every N frames to find new objects
             output_dir: Directory to save results
+            max_frames: Maximum frames to process (for memory efficiency)
+            frame_skip: Process every Nth frame (e.g., 5 = every 5th frame)
             
         Returns:
             Dictionary with tracked objects and their trajectories
         """
-        if self.video_model is None:
+        if self.image_model is None:
             raise RuntimeError("Models not loaded. Call load_models() first.")
             
         print(f"Processing video: {video_path}")
+        print(f"  Frame skip: every {frame_skip} frames")
+        print(f"  Max frames: {max_frames}")
         
-        # Load video frames
-        video_frames = self._load_video_frames(video_path)
+        # Load video frames with subsampling
+        video_frames, fps, frame_mapping = self._load_video_frames(video_path, max_frames=max_frames, frame_skip=frame_skip)
         num_frames = len(video_frames)
-        print(f"Loaded {num_frames} frames")
+        print(f"Loaded {num_frames} frames (subsampled)")
         
-        # Initialize video tracking session
-        print("Initializing video tracking session...")
-        inference_session = self.video_processor.init_video_session(
-            video=video_frames,
-            inference_device=self.device,
-            dtype=torch.bfloat16
-        )
+        # Run detection on ALL frames throughout the video
+        print(f"Running detection on all {num_frames} frames with prompts: {text_prompts}")
         
-        # Detect initial objects on first frame using text prompts
-        print(f"Detecting objects with prompts: {text_prompts}")
-        first_frame = video_frames[0]
-        if isinstance(first_frame, torch.Tensor):
-            first_frame = first_frame.permute(1, 2, 0).cpu().numpy()
-            first_frame = (first_frame * 255).astype(np.uint8)
-            
-        initial_detections = self.detect_with_text(
-            first_frame, 
-            text_prompts[0], 
-            threshold=detection_threshold
-        )
-        
-        print(f"Found {len(initial_detections)} objects in first frame")
-        
-        if len(initial_detections) == 0:
-            print("No objects detected in first frame. Trying more frames...")
-            # Try a few more frames
-            for frame_idx in [10, 30, 60]:
-                if frame_idx < num_frames:
-                    frame = video_frames[frame_idx]
-                    if isinstance(frame, torch.Tensor):
-                        frame = frame.permute(1, 2, 0).cpu().numpy()
-                        frame = (frame * 255).astype(np.uint8)
-                    detections = self.detect_with_text(frame, text_prompts[0], threshold=detection_threshold)
-                    if detections:
-                        initial_detections = detections
-                        print(f"Found {len(detections)} objects at frame {frame_idx}")
-                        break
-        
-        # Add detected objects to tracking session using their centroids as point prompts
+        # Store all detections with their frame info
+        all_detections = []  # List of (frame_idx, detection)
         tracked_objects = {}
-        
-        for i, detection in enumerate(initial_detections):
-            obj_id = i + 1
-            cx, cy = detection['centroid']
-            
-            # Add point prompt for this object
-            self.video_processor.add_inputs_to_inference_session(
-                inference_session=inference_session,
-                frame_idx=0,
-                obj_ids=obj_id,
-                input_points=[[[[cx, cy]]]],
-                input_labels=[[[1]]]  # 1 = positive click
-            )
-            
-            tracked_objects[obj_id] = {
-                'id': obj_id,
-                'initial_detection': detection,
-                'trajectory': [],
-                'confidence': detection['confidence'],
-                'label': detection['label']
-            }
-            
-        print(f"Tracking {len(tracked_objects)} objects through video...")
-        
-        # Propagate tracking through entire video
+        next_obj_id = 1
         video_segments = {}
         
-        for output in self.video_model.propagate_in_video_iterator(
-            inference_session,
-            show_progress_bar=True
-        ):
-            frame_idx = output.frame_idx
-            masks = self.video_processor.post_process_masks(
-                [output.pred_masks],
-                original_sizes=[[inference_session.video_height, inference_session.video_width]],
-                binarize=True
-            )[0]
+        # Distance threshold for considering two detections as the same pothole
+        # This accounts for camera movement between frames
+        DEDUP_DISTANCE_THRESHOLD = 150  # pixels
+        
+        for frame_idx in range(num_frames):
+            frame = video_frames[frame_idx]
+            if isinstance(frame, torch.Tensor):
+                frame = frame.permute(1, 2, 0).cpu().numpy()
+                frame = (frame * 255).astype(np.uint8)
+            elif isinstance(frame, Image.Image):
+                frame = np.array(frame)
             
-            video_segments[frame_idx] = {
-                obj_id: masks[i].cpu().numpy()
-                for i, obj_id in enumerate(inference_session.obj_ids)
-            }
+            # Detect potholes in this frame
+            frame_detections = self.detect_with_text(frame, text_prompts[0], threshold=detection_threshold)
             
-            # Update trajectories
-            for i, obj_id in enumerate(inference_session.obj_ids):
-                if obj_id in tracked_objects:
-                    mask = masks[i].cpu().numpy()
-                    # Get centroid from mask
-                    if mask.sum() > 0:
-                        y_coords, x_coords = np.where(mask > 0.5)
-                        cx = x_coords.mean()
-                        cy = y_coords.mean()
-                        area = mask.sum()
-                        tracked_objects[obj_id]['trajectory'].append({
+            new_in_frame = 0
+            matched_in_frame = 0
+            
+            for detection in frame_detections:
+                cx, cy = detection['centroid']
+                
+                # Check if this detection matches any existing tracked object
+                best_match = None
+                best_dist = float('inf')
+                
+                for obj_id, obj_data in tracked_objects.items():
+                    # Check against all positions in trajectory (not just last)
+                    # This helps with objects that temporarily disappear
+                    for traj_point in obj_data['trajectory']:
+                        prev_cx, prev_cy = traj_point['centroid']
+                        dist = ((cx - prev_cx)**2 + (cy - prev_cy)**2) ** 0.5
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_match = obj_id
+                
+                if best_match and best_dist < DEDUP_DISTANCE_THRESHOLD:
+                    # This is an existing pothole - update its trajectory
+                    tracked_objects[best_match]['trajectory'].append({
+                        'frame': frame_idx,
+                        'centroid': [float(cx), float(cy)],
+                        'area': detection['area']
+                    })
+                    # Update confidence if this detection is higher
+                    if detection['confidence'] > tracked_objects[best_match]['confidence']:
+                        tracked_objects[best_match]['confidence'] = detection['confidence']
+                        tracked_objects[best_match]['best_detection'] = detection
+                        tracked_objects[best_match]['best_frame_idx'] = frame_idx
+                    matched_in_frame += 1
+                else:
+                    # This is a NEW pothole - create new tracked object
+                    obj_id = next_obj_id
+                    next_obj_id += 1
+                    
+                    tracked_objects[obj_id] = {
+                        'id': obj_id,
+                        'initial_detection': detection,
+                        'best_detection': detection,
+                        'best_frame_idx': frame_idx,
+                        'first_frame_idx': frame_idx,
+                        'trajectory': [{
                             'frame': frame_idx,
                             'centroid': [float(cx), float(cy)],
-                            'area': float(area)
-                        })
+                            'area': detection['area']
+                        }],
+                        'confidence': detection['confidence'],
+                        'label': detection['label']
+                    }
+                    new_in_frame += 1
+                
+                # Store segment info
+                video_segments[frame_idx] = video_segments.get(frame_idx, {})
+            
+            if frame_idx % 10 == 0 or frame_idx == num_frames - 1:
+                print(f"  Frame {frame_idx + 1}/{num_frames}: {len(frame_detections)} detections "
+                      f"({new_in_frame} new, {matched_in_frame} matched) - "
+                      f"Total unique: {len(tracked_objects)}")
         
         # Summary
         print(f"\n✓ Video processing complete!")
@@ -320,42 +314,50 @@ class SAM3VideoModel:
             'num_frames': num_frames,
             'unique_objects': len(tracked_objects),
             'objects': tracked_objects,
-            'segments': video_segments
+            'segments': video_segments,
+            'video_frames': video_frames,
+            'fps': fps,
+            'frame_mapping': frame_mapping
         }
 
-    def _load_video_frames(self, video_path: str, max_frames: int = None) -> List:
-        """Load video frames from file."""
-        from transformers.video_utils import load_video
-        
-        # Try using transformers video utility first
-        try:
-            frames, _ = load_video(video_path)
-            if max_frames and len(frames) > max_frames:
-                # Subsample frames
-                indices = np.linspace(0, len(frames) - 1, max_frames, dtype=int)
-                frames = [frames[i] for i in indices]
-            return frames
-        except Exception as e:
-            print(f"Transformers video load failed: {e}")
-            print("Falling back to OpenCV...")
-        
-        # Fallback to OpenCV
+    def _load_video_frames(self, video_path: str, max_frames: int = 300, frame_skip: int = 5) -> Tuple[List, float, Dict[int, int]]:
+        """
+        Load frames from video, sampling evenly across the ENTIRE video duration.
+        """
         cap = cv2.VideoCapture(video_path)
-        frames = []
         
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            # Convert BGR to RGB
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(Image.fromarray(frame_rgb))
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video: {video_path}")
             
-            if max_frames and len(frames) >= max_frames:
-                break
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        duration = total_frames / fps if fps > 0 else 0
+        
+        print(f"  Video: {total_frames} frames, {fps:.1f} FPS, {duration:.1f} seconds")
+        
+        # Simple: sample max_frames evenly across entire video
+        num_samples = min(max_frames, total_frames)
+        step = max(1, total_frames // num_samples)
+        
+        frame_indices = list(range(0, total_frames, step))[:num_samples]
+        
+        print(f"  Sampling {len(frame_indices)} frames (every {step} frames)")
+        print(f"  Coverage: frame 0 to {frame_indices[-1]} ({frame_indices[-1]/fps:.1f}s of {duration:.1f}s)")
+        
+        frames = []
+        frame_mapping = {}
+        
+        for i, frame_idx in enumerate(frame_indices):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if ret:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frames.append(Image.fromarray(frame_rgb))
+                frame_mapping[i] = frame_idx
                 
         cap.release()
-        return frames
+        print(f"  Loaded {len(frames)} frames")
+        return frames, fps, frame_mapping
 
 
 class SAM3VideoPotholeDetector:
@@ -365,26 +367,105 @@ class SAM3VideoPotholeDetector:
         self.sam_model = sam_video_model
         self.pothole_prompts = [
             "pothole",
-            "road damage", 
-            "asphalt crack",
-            "pavement hole"
+            "pothole in road",
+            "road pothole",
+            "hole in asphalt"
         ]
+    
+    def is_likely_manhole(self, frame: np.ndarray, bbox: List[float], mask: Optional[np.ndarray] = None) -> bool:
+        """
+        Check if a detection is likely a manhole/sewer cover rather than a pothole.
+        
+        Manholes have:
+        - Uniform color/texture (metallic surface)
+        - Regular, smooth edges
+        - Often circular with aspect ratio ~1.0
+        
+        Args:
+            frame: RGB frame as numpy array
+            bbox: Bounding box [x, y, w, h]
+            mask: Optional segmentation mask
+            
+        Returns:
+            True if detection looks like a manhole (should be filtered out)
+        """
+        x, y, w, h = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+        
+        # Ensure valid bbox
+        if w <= 0 or h <= 0:
+            return False
+            
+        # Ensure bbox is within frame bounds
+        frame_h, frame_w = frame.shape[:2]
+        x = max(0, min(x, frame_w - 1))
+        y = max(0, min(y, frame_h - 1))
+        x2 = min(x + w, frame_w)
+        y2 = min(y + h, frame_h)
+        
+        if x2 <= x or y2 <= y:
+            return False
+        
+        # Extract the region of interest
+        roi = frame[y:y2, x:x2]
+        
+        if roi.size == 0:
+            return False
+        
+        # Convert to grayscale for analysis
+        if len(roi.shape) == 3:
+            gray_roi = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+        else:
+            gray_roi = roi
+        
+        # Check 1: Aspect ratio close to 1.0 (circular/square)
+        aspect_ratio = w / h if h > 0 else 0
+        is_square = 0.75 < aspect_ratio < 1.35
+        
+        # Check 2: Low texture variance (smooth metallic surface)
+        # Manholes have uniform surfaces, potholes have rough/varied texture
+        texture_std = np.std(gray_roi)
+        is_uniform = texture_std < 35  # Low variance = uniform surface
+        
+        # Check 3: Edge analysis - manholes have clean, regular edges
+        edges = cv2.Canny(gray_roi, 50, 150)
+        edge_density = np.sum(edges > 0) / edges.size if edges.size > 0 else 0
+        has_clean_edges = 0.02 < edge_density < 0.15  # Moderate edge density
+        
+        # Check 4: Color analysis - manholes often have grayish metallic color
+        if len(roi.shape) == 3:
+            mean_color = np.mean(roi, axis=(0, 1))
+            # Check if grayish (R, G, B similar values)
+            color_std = np.std(mean_color)
+            is_grayish = color_std < 15  # Low color variance = grayish
+        else:
+            is_grayish = False
+        
+        # Combine checks - if multiple indicators suggest manhole, filter it out
+        manhole_score = sum([is_square, is_uniform, has_clean_edges, is_grayish])
+        
+        # Need at least 3 indicators to classify as manhole
+        return manhole_score >= 3
         
     def detect_potholes_in_video(
         self,
         video_path: str,
         confidence_threshold: float = 0.5,
-        output_dir: Optional[str] = None
+        output_dir: Optional[str] = None,
+        max_frames: int = 300,
+        frame_skip: int = 5
     ) -> Dict:
         """
         Detect and track potholes throughout a video.
         
         Each unique pothole is detected once and tracked, eliminating duplicates.
+        Saves frame images for each detected pothole.
         
         Args:
             video_path: Path to drone video
             confidence_threshold: Minimum confidence for detection
-            output_dir: Directory to save results
+            output_dir: Directory to save results (frame images will be saved here)
+            max_frames: Maximum frames to process
+            frame_skip: Process every Nth frame
             
         Returns:
             Dictionary with unique potholes and their tracks
@@ -393,28 +474,106 @@ class SAM3VideoPotholeDetector:
             video_path=video_path,
             text_prompts=self.pothole_prompts,
             detection_threshold=confidence_threshold,
-            output_dir=output_dir
+            output_dir=output_dir,
+            max_frames=max_frames,
+            frame_skip=frame_skip
         )
+        
+        video_frames = results.get('video_frames', [])
+        fps = results.get('fps', 30.0)
+        frame_mapping = results.get('frame_mapping', {})
+        
+        # Create frames subdirectory if output_dir is provided
+        frames_dir = None
+        if output_dir:
+            frames_dir = Path(output_dir) / "frames"
+            frames_dir.mkdir(parents=True, exist_ok=True)
         
         # Filter and enhance results
         potholes = []
+        filtered_manholes = 0
+        
         for obj_id, obj_data in results['objects'].items():
             if obj_data['trajectory']:  # Only include objects that were actually tracked
+                first_subsampled_frame = obj_data['trajectory'][0]['frame'] if obj_data['trajectory'] else 0
+                last_subsampled_frame = obj_data['trajectory'][-1]['frame'] if obj_data['trajectory'] else 0
+                
+                # Use the frame with best confidence for the image
+                best_frame_idx = obj_data.get('best_frame_idx', first_subsampled_frame)
+                best_detection = obj_data.get('best_detection', obj_data['initial_detection'])
+                
+                # Get original video frame number
+                original_frame_num = frame_mapping.get(best_frame_idx, best_frame_idx * frame_skip)
+                
+                # MANHOLE FILTER: Check if this detection looks like a manhole/sewer cover
+                if best_frame_idx < len(video_frames):
+                    frame_for_check = video_frames[best_frame_idx]
+                    if isinstance(frame_for_check, Image.Image):
+                        frame_np_check = np.array(frame_for_check)
+                    else:
+                        frame_np_check = frame_for_check
+                    
+                    bbox = best_detection['bbox']
+                    mask = best_detection.get('mask', None)
+                    
+                    if self.is_likely_manhole(frame_np_check, bbox, mask):
+                        filtered_manholes += 1
+                        print(f"  Filtered out manhole-like detection: object {obj_id}")
+                        continue  # Skip this detection
+                
                 pothole = {
                     'pothole_id': f"pothole_{obj_id:03d}",
                     'confidence': obj_data['confidence'],
-                    'first_frame': obj_data['trajectory'][0]['frame'] if obj_data['trajectory'] else 0,
-                    'last_frame': obj_data['trajectory'][-1]['frame'] if obj_data['trajectory'] else 0,
+                    'first_frame': first_subsampled_frame,
+                    'last_frame': last_subsampled_frame,
+                    'best_frame': best_frame_idx,
+                    'original_frame_number': original_frame_num,
                     'frames_visible': len(obj_data['trajectory']),
-                    'initial_bbox': obj_data['initial_detection']['bbox'],
-                    'label': obj_data['label']
+                    'initial_bbox': best_detection['bbox'],
+                    'label': obj_data['label'],
+                    'image_filename': None
                 }
+                
+                # Save frame image from the BEST detection frame (highest confidence)
+                if frames_dir and best_frame_idx < len(video_frames):
+                    frame_img = video_frames[best_frame_idx]
+                    image_filename = f"pothole_{obj_id:03d}_frame_{original_frame_num}.jpg"
+                    image_path = frames_dir / image_filename
+                    
+                    # Convert PIL Image to numpy for drawing bbox
+                    frame_np = np.array(frame_img)
+                    
+                    # Draw bounding box on the frame using best detection's bbox
+                    bbox = best_detection['bbox']
+                    x, y, w, h = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+                    cv2.rectangle(frame_np, (x, y), (x + w, y + h), (0, 255, 0), 3)
+                    
+                    # Add label with confidence
+                    label_text = f"Pothole {obj_id} ({obj_data['confidence']:.2f})"
+                    cv2.putText(frame_np, label_text, (x, y - 10), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+                    
+                    # Save as BGR for cv2
+                    frame_bgr = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
+                    cv2.imwrite(str(image_path), frame_bgr)
+                    
+                    pothole['image_filename'] = image_filename
+                    print(f"  Saved frame: {image_filename} (from frame {best_frame_idx}, conf={obj_data['confidence']:.2f})")
+                
                 potholes.append(pothole)
+        
+        if filtered_manholes > 0:
+            print(f"\n  Filtered out {filtered_manholes} manhole/sewer detections")
+        
+        # Clear video frames from results to save memory (they're saved to disk now)
+        results_without_frames = {k: v for k, v in results.items() if k != 'video_frames'}
                 
         return {
             'video_path': video_path,
             'num_frames': results['num_frames'],
             'unique_potholes': len(potholes),
             'potholes': potholes,
-            'raw_results': results
+            'fps': fps,
+            'frame_skip': frame_skip,
+            'raw_results': results_without_frames
         }

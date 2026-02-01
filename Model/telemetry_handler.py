@@ -1,10 +1,13 @@
 """
 Telemetry Data Handler for Drone Footage
 Processes and stores GPS, altitude, and other drone metadata
+Supports extraction from DJI MP4 files via embedded subtitles
 """
 
 import json
-from typing import Dict, Optional, List
+import re
+import subprocess
+from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import csv
@@ -123,34 +126,211 @@ class TelemetryHandler:
 
     def _parse_dji_metadata(self, text: str, frame_num: int) -> Optional[TelemetryData]:
         """
-        Parse DJI metadata text
+        Parse DJI metadata text from SRT subtitle
 
         Args:
             text: Metadata text string
-            frame_num: Frame number
+            frame_num: Frame number (1-indexed from SRT, represents seconds)
 
         Returns:
             TelemetryData object or None
         """
-        # Example DJI SRT format parsing
-        # Format varies by drone model - this is a simplified parser
         data = {
             'frame_number': frame_num,
-            'timestamp': datetime.now().timestamp()
+            'timestamp': float(frame_num)  # Use frame_num as timestamp in seconds
         }
 
-        # Extract GPS coordinates
-        if 'GPS' in text:
-            # Parse GPS data (latitude, longitude, altitude)
-            # Format example: GPS (12.3456, 78.9012, 100)
-            import re
-            gps_match = re.search(r'GPS\s*\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)', text)
+        # DJI Air 3S format examples:
+        # [latitude: 12.345678] [longitude: 78.901234] [rel_alt: 50.000 abs_alt: 100.000]
+        # Or: GPS(12.3456, 78.9012, 100) D:1.2m H:0.5m/s V:0.0m/s
+        
+        # Try newer DJI format first (Air 3S style)
+        lat_match = re.search(r'\[latitude:\s*([-\d.]+)\]', text)
+        lon_match = re.search(r'\[longitude:\s*([-\d.]+)\]', text)
+        rel_alt_match = re.search(r'\[rel_alt:\s*([-\d.]+)', text)
+        abs_alt_match = re.search(r'abs_alt:\s*([-\d.]+)', text)
+        
+        if lat_match and lon_match:
+            data['latitude'] = float(lat_match.group(1))
+            data['longitude'] = float(lon_match.group(1))
+            if rel_alt_match:
+                data['altitude'] = float(rel_alt_match.group(1))
+            elif abs_alt_match:
+                data['altitude'] = float(abs_alt_match.group(1))
+        else:
+            # Try older GPS format
+            gps_match = re.search(r'GPS\s*\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)', text)
             if gps_match:
                 data['latitude'] = float(gps_match.group(1))
                 data['longitude'] = float(gps_match.group(2))
                 data['altitude'] = float(gps_match.group(3))
 
+        # Extract speed/velocity info
+        h_vel_match = re.search(r'H:\s*([-\d.]+)', text)
+        v_vel_match = re.search(r'V:\s*([-\d.]+)', text)
+        if h_vel_match:
+            data['speed'] = float(h_vel_match.group(1))
+
+        # Extract gimbal info if present
+        gb_yaw_match = re.search(r'\[gb_yaw:\s*([-\d.]+)', text)
+        gb_pitch_match = re.search(r'gb_pitch:\s*([-\d.]+)', text)
+        gb_roll_match = re.search(r'gb_roll:\s*([-\d.]+)', text)
+        
+        if gb_yaw_match:
+            data['gimbal_yaw'] = float(gb_yaw_match.group(1))
+        if gb_pitch_match:
+            data['gimbal_pitch'] = float(gb_pitch_match.group(1))
+        if gb_roll_match:
+            data['gimbal_roll'] = float(gb_roll_match.group(1))
+
         return TelemetryData(**data)
+
+    def load_from_mp4(self, video_path: str, fps: float = 30.0) -> bool:
+        """
+        Extract telemetry from DJI MP4 video file using ffmpeg.
+        DJI drones embed telemetry as subtitle streams in the video.
+
+        Args:
+            video_path: Path to MP4 video file
+            fps: Video frame rate (for mapping seconds to frames)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        video_file = Path(video_path)
+        if not video_file.exists():
+            print(f"Video file not found: {video_path}")
+            return False
+
+        try:
+            # First, check if video has subtitle stream
+            probe_result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-select_streams', 's', 
+                 '-show_entries', 'stream=index,codec_name', 
+                 '-of', 'json', str(video_path)],
+                capture_output=True,
+                text=True
+            )
+            
+            if probe_result.returncode != 0:
+                print(f"ffprobe error: {probe_result.stderr}")
+                return False
+                
+            probe_data = json.loads(probe_result.stdout)
+            if not probe_data.get('streams'):
+                print("No subtitle stream found in video")
+                return False
+                
+            print(f"Found subtitle stream in video, extracting telemetry...")
+            
+            # Extract subtitle stream as SRT
+            result = subprocess.run(
+                ['ffmpeg', '-y', '-i', str(video_path),
+                 '-map', '0:s:0', '-f', 'srt', '-'],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                print(f"ffmpeg extraction error: {result.stderr}")
+                return False
+                
+            srt_content = result.stdout
+            if not srt_content.strip():
+                print("Extracted subtitle stream is empty")
+                return False
+                
+            # Parse the SRT content
+            return self._parse_srt_content(srt_content, fps)
+            
+        except FileNotFoundError:
+            print("ffmpeg/ffprobe not found. Please install ffmpeg.")
+            return False
+        except Exception as e:
+            print(f"Error extracting telemetry from MP4: {e}")
+            return False
+
+    def _parse_srt_content(self, srt_content: str, fps: float = 30.0) -> bool:
+        """
+        Parse SRT subtitle content to extract telemetry.
+
+        Args:
+            srt_content: Raw SRT subtitle text
+            fps: Video frame rate
+
+        Returns:
+            True if successful
+        """
+        entries = srt_content.strip().split('\n\n')
+        parsed_count = 0
+        
+        for entry in entries:
+            lines = entry.strip().split('\n')
+            if len(lines) < 3:
+                continue
+
+            try:
+                subtitle_num = int(lines[0])
+                # Parse timestamp: "00:00:00,000 --> 00:00:01,000"
+                time_line = lines[1]
+                time_match = re.match(r'(\d+):(\d+):(\d+),(\d+)', time_line)
+                
+                if time_match:
+                    hours = int(time_match.group(1))
+                    minutes = int(time_match.group(2))
+                    seconds = int(time_match.group(3))
+                    millis = int(time_match.group(4))
+                    
+                    total_seconds = hours * 3600 + minutes * 60 + seconds + millis / 1000
+                    # Convert to frame number (approximate)
+                    frame_num = int(total_seconds * fps)
+                else:
+                    frame_num = subtitle_num
+                
+                # Join remaining lines as metadata
+                metadata_text = '\n'.join(lines[2:])
+                
+                # Parse metadata
+                telemetry = self._parse_dji_metadata(metadata_text, frame_num)
+                if telemetry and (telemetry.latitude is not None or telemetry.longitude is not None):
+                    self.telemetry_data[frame_num] = telemetry
+                    parsed_count += 1
+                    
+            except (ValueError, IndexError) as e:
+                continue
+
+        print(f"Extracted {parsed_count} telemetry entries from video (fps={fps})")
+        return parsed_count > 0
+
+    def get_telemetry_for_frame(self, frame_number: int, fps: float = 30.0) -> Optional[TelemetryData]:
+        """
+        Get telemetry for a specific video frame.
+        Since DJI telemetry is typically 1Hz, this maps frame numbers to seconds.
+
+        Args:
+            frame_number: Video frame number
+            fps: Video frame rate
+
+        Returns:
+            TelemetryData or None
+        """
+        # Try exact match first
+        if frame_number in self.telemetry_data:
+            return self.telemetry_data[frame_number]
+        
+        # Find closest telemetry sample
+        if not self.telemetry_data:
+            return None
+            
+        # Find the nearest available telemetry data
+        closest_frame = min(self.telemetry_data.keys(), 
+                          key=lambda x: abs(x - frame_number))
+        
+        # If within 2 seconds worth of frames, use it
+        if abs(closest_frame - frame_number) < fps * 2:
+            return self.telemetry_data[closest_frame]
+            
+        return None
 
     def _load_csv_file(self, filepath: str) -> bool:
         """
