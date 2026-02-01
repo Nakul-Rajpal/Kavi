@@ -185,3 +185,20 @@ body {
 .neon-border {
   box-shadow: 0 0 15px currentColor, inset 0 0 15px currentColor;
 }
+
+/* ===== MAPLIBRE TICKET POPUP ===== */
+
+.maplibregl-popup {
+  z-index: 1000;
+}
+
+.maplibregl-popup-content {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.maplibregl-popup-tip {
+  display: none !important;
+}
