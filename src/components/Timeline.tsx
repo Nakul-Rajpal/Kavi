@@ -1,88 +1,123 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { Clock, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { useState } from "react";
 
 interface TimelineProps {
-  currentTime: string;
-  setCurrentTime: (time: string) => void;
+  timeRange: string;
+  onTimeRangeChange: (range: string) => void;
 }
 
-export default function Timeline({ currentTime, setCurrentTime }: TimelineProps) {
-  const times = [
-    "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
-    "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM"
-  ];
+// Time range options - exported for use in Map filtering
+export const TIME_RANGES = [
+  { label: "Last Hour", value: "1h", hours: 1 },
+  { label: "Last 6 Hours", value: "6h", hours: 6 },
+  { label: "Last 12 Hours", value: "12h", hours: 12 },
+  { label: "Last 24 Hours", value: "24h", hours: 24 },
+  { label: "Last 7 Days", value: "7d", hours: 168 },
+  { label: "All Time", value: "all", hours: -1 },
+];
 
-  const currentIndex = times.indexOf(currentTime);
+export default function Timeline({ timeRange, onTimeRangeChange }: TimelineProps) {
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const handleRangeSelect = (value: string) => {
+    onTimeRangeChange(value);
+  };
+
+  const formatDisplayDate = () => {
+    const date = new Date(selectedDate);
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'short', 
+      month: 'short', 
+      day: 'numeric' 
+    });
+  };
+
+  const changeDate = (delta: number) => {
+    const date = new Date(selectedDate);
+    date.setDate(date.getDate() + delta);
+    if (date <= new Date()) {
+      setSelectedDate(date.toISOString().split('T')[0]);
+    }
+  };
 
   return (
     <motion.div
-      initial={{ y: 50, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      exit={{ y: 50, opacity: 0 }}
-      className="absolute bottom-16 left-1/2 -translate-x-1/2 w-[800px] z-[500] pointer-events-auto"
+      initial={{ opacity: 0, y: -10, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -10, scale: 0.95 }}
+      transition={{ duration: 0.2 }}
+      className="absolute top-20 right-8 z-[800] pointer-events-auto"
     >
-      <div className="liquid-glass rounded-[40px] p-10 flex flex-col gap-8 border border-white/20 shadow-[0_0_80px_rgba(0,0,0,0.6)]">
-        <div className="flex justify-between items-end px-2">
-          <div>
-            <h3 className="text-[10px] font-black text-cyan-400 tracking-[0.3em] uppercase mb-1">Temporal Archive</h3>
-            <p className="text-sm text-white/60 font-medium">Scrubbing through last 24h of telemetry data</p>
+      <div className="liquid-glass rounded-3xl p-6 w-72 border border-white/20 shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-10 h-10 rounded-xl bg-cyan-500/20 flex items-center justify-center">
+            <Clock size={20} className="text-cyan-400" />
           </div>
-          <div className="text-4xl font-black font-mono text-white tracking-tighter">
-            {currentTime}
+          <div>
+            <h3 className="text-xs font-black text-cyan-400 uppercase tracking-wider">Time Filter</h3>
+            <p className="text-[10px] text-white/40">View historical data</p>
           </div>
         </div>
 
-        <div className="relative h-20 flex items-center group">
-          {/* Timeline Track */}
-          <div className="absolute inset-x-0 h-2 bg-white/5 rounded-full overflow-hidden">
-            <motion.div 
-              className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-500 to-blue-500"
-              animate={{ width: `${(currentIndex / (times.length - 1)) * 100}%` }}
-            />
-          </div>
-          
-          {/* Timeline Marks */}
-          <div className="absolute inset-x-0 flex justify-between px-1">
-            {times.map((t, i) => (
-              <div key={t} className="flex flex-col items-center gap-3">
-                <div 
-                  className={`w-[2px] h-4 rounded-full transition-all duration-500 ${
-                    i <= currentIndex ? "bg-cyan-400" : "bg-white/10"
-                  }`} 
-                />
-                <span className={`text-[8px] font-black font-mono transition-all duration-500 ${
-                  i === currentIndex ? "text-cyan-400 scale-125" : "text-white/20"
-                }`}>
-                  {t.split(' ')[0]}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {/* Slider Input */}
-          <input
-            type="range"
-            min="0"
-            max={times.length - 1}
-            step="1"
-            value={currentIndex}
-            onChange={(e) => setCurrentTime(times[parseInt(e.target.value)])}
-            className="absolute inset-x-0 w-full h-full opacity-0 cursor-pointer z-20"
-          />
-
-          {/* Custom Thumb (Visual) */}
-          <motion.div 
-            className="absolute w-10 h-10 bg-white rounded-2xl shadow-[0_0_30px_rgba(0,243,255,0.6)] border-4 border-cyan-400 pointer-events-none flex items-center justify-center overflow-hidden"
-            animate={{ 
-              left: `${(currentIndex / (times.length - 1)) * 100}%` 
-            }}
-            style={{ x: "-50%" }}
-          >
-            <div className="w-full h-full bg-gradient-to-br from-white to-cyan-100 flex items-center justify-center">
-              <div className="w-1 h-4 bg-cyan-500/30 rounded-full" />
+        {/* Date Selector */}
+        <div className="mb-4 p-3 rounded-2xl bg-white/5 border border-white/10">
+          <div className="flex items-center justify-between">
+            <button 
+              onClick={() => changeDate(-1)}
+              className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <div className="flex items-center gap-2">
+              <Calendar size={14} className="text-cyan-400" />
+              <span className="text-sm font-bold text-white">{formatDisplayDate()}</span>
             </div>
-          </motion.div>
+            <button 
+              onClick={() => changeDate(1)}
+              disabled={new Date(selectedDate).toDateString() === new Date().toDateString()}
+              className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Time Range Options */}
+        <div className="space-y-2">
+          {TIME_RANGES.map((range) => (
+            <button
+              key={range.value}
+              onClick={() => handleRangeSelect(range.value)}
+              className={`w-full p-3 rounded-xl text-left transition-all flex items-center justify-between group ${
+                timeRange === range.value
+                  ? "bg-cyan-500/20 border border-cyan-500/50"
+                  : "bg-white/5 border border-transparent hover:bg-white/10 hover:border-white/10"
+              }`}
+            >
+              <span className={`text-sm font-semibold ${
+                timeRange === range.value ? "text-cyan-400" : "text-white/70 group-hover:text-white"
+              }`}>
+                {range.label}
+              </span>
+              {timeRange === range.value && (
+                <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#00f3ff]" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Current Selection Display */}
+        <div className="mt-5 pt-5 border-t border-white/10">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-white/40 uppercase tracking-wider">Showing</span>
+            <span className="text-sm font-bold text-white">
+              {TIME_RANGES.find(r => r.value === timeRange)?.label || "All Data"}
+            </span>
+          </div>
         </div>
       </div>
     </motion.div>

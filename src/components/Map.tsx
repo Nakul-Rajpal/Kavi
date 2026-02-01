@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Map, { Marker, Popup, NavigationControl } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { getSupabase, Ping } from "@/lib/supabase";
+import { IssueTypeId } from "./FilterMenu";
+import { TIME_RANGES } from "./Timeline";
 
 // Debug logging
-const DEBUG = true;
+const DEBUG = false;
 const log = (...args: unknown[]) => DEBUG && console.log("[Map]", ...args);
 
 // Dark style with 3D buildings and visible labels
@@ -60,18 +62,23 @@ function CustomMarker({
   const color = severityColors[severity] || severityColors.default;
   const type = ping.type || "default";
   
-  // Get icon based on type
+  // Get icon based on type - consistent emojis for each issue type
   const getIcon = () => {
     switch (type) {
       case "pothole":
-        return "⚠️";
-      case "light":
+        return "🕳️";
+      case "damaged_light":
         return "💡";
-      case "flood":
-        return "💧";
+      case "fallen_tree":
+        return "🌳";
+      case "faded_lines":
+        return "🛣️";
       case "debris":
         return "🗑️";
+      case "flood":
+        return "💧";
       case "sign":
+      case "damaged_sign":
         return "🚧";
       default:
         return "📍";
@@ -155,11 +162,12 @@ function formatTime(minutes?: number): string {
 
 interface MapProps {
   isLive: boolean;
-  currentTime: string;
+  timeRange: string;
   onPingsUpdate?: (data: { count: number; latest: Ping | null; pings: Ping[] }) => void;
+  activeFilters?: Set<IssueTypeId>;
 }
 
-export default function Map3D({ isLive, currentTime, onPingsUpdate }: MapProps) {
+export default function Map3D({ isLive, timeRange, onPingsUpdate, activeFilters = new Set() }: MapProps) {
   const [pings, setPings] = useState<Ping[]>([]);
   const [latestPing, setLatestPing] = useState<Ping | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
@@ -167,10 +175,35 @@ export default function Map3D({ isLive, currentTime, onPingsUpdate }: MapProps) 
   const pingIdsRef = useRef(new Set<string>());
   const mapRef = useRef<any>(null);
 
-  // Get the currently hovered ping
-  const hoveredPing = hoveredPingId ? pings.find(p => p.id === hoveredPingId) : null;
+  // Filter pings based on active filters AND time range
+  const filteredPings = useMemo(() => {
+    let result = pings;
+    
+    // Filter by time range
+    if (timeRange !== "all") {
+      const range = TIME_RANGES.find(r => r.value === timeRange);
+      if (range && range.hours > 0) {
+        const cutoffTime = new Date();
+        cutoffTime.setHours(cutoffTime.getHours() - range.hours);
+        result = result.filter(ping => new Date(ping.created_at) >= cutoffTime);
+      }
+    }
+    
+    // Filter by issue type
+    if (activeFilters.size > 0) {
+      result = result.filter(ping => {
+        const pingType = ping.type as IssueTypeId | undefined;
+        return pingType && activeFilters.has(pingType);
+      });
+    }
+    
+    return result;
+  }, [pings, activeFilters, timeRange]);
 
-  log("Render - hoveredPingId:", hoveredPingId, "hoveredPing:", hoveredPing?.id);
+  // Get the currently hovered ping from filtered list
+  const hoveredPing = hoveredPingId ? filteredPings.find(p => p.id === hoveredPingId) : null;
+
+  log("Render - hoveredPingId:", hoveredPingId, "hoveredPing:", hoveredPing?.id, "filtered:", filteredPings.length);
 
   // Providence, RI center
   const [viewState, setViewState] = useState({
@@ -280,23 +313,6 @@ export default function Map3D({ isLive, currentTime, onPingsUpdate }: MapProps) 
 
   return (
     <div className="w-full h-full relative" style={{ background: "#0d1117" }}>
-      {/* Connection Status Indicator */}
-      <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10">
-        <div
-          className={`w-2 h-2 rounded-full ${
-            connectionStatus === "connected"
-              ? "bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]"
-              : connectionStatus === "connecting"
-              ? "bg-yellow-500 animate-pulse"
-              : "bg-red-500"
-          }`}
-        />
-        <span className="text-[10px] font-bold uppercase tracking-wider text-white/70">
-          {connectionStatus === "connected" ? "Live" : connectionStatus === "connecting" ? "Connecting..." : "Offline"}
-        </span>
-        <span className="text-[10px] text-white/40">{pings.length} pings</span>
-      </div>
-
       <Map
         ref={mapRef}
         {...viewState}
@@ -305,8 +321,8 @@ export default function Map3D({ isLive, currentTime, onPingsUpdate }: MapProps) 
         style={{ width: "100%", height: "100%" }}
         maxPitch={85}
       >
-        {/* Markers for each ping */}
-        {pings.map((ping) => (
+        {/* Markers for each ping (filtered) */}
+        {filteredPings.map((ping) => (
           <Marker
             key={ping.id}
             longitude={ping.lng}
