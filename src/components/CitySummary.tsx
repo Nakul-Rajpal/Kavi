@@ -101,10 +101,10 @@ const RECENCY_MULTIPLIERS: [number, number][] = [
 const MISSING_TIMESTAMP_MULTIPLIER = 0.6;
 
 // Risk-to-score conversion
-const RISK_SATURATION_R = 120.0;
+const RISK_SATURATION_R = 600.0;
 const HIGH_PRIOR_SCORE = 99;
 const SCORE_RANGE = 98;
-const VOLUME_PENALTY_THRESHOLD = 20;
+const VOLUME_PENALTY_THRESHOLD = 50;
 const MIN_SCORE_FEW_MINOR_ISSUES = 97;
 const MAX_SCORE_CRITICAL_HIGH_OPEN = 92;
 const ANALYSIS_DAYS = 30;
@@ -165,11 +165,10 @@ function classifyCriticality(issue: PingData): number {
   // Check major keywords
   for (const keyword of MAJOR_KEYWORDS) {
     if (issueType.includes(keyword)) {
-      // Potholes: severity determines criticality
+      // Potholes: only high-severity are MAJOR, otherwise MINOR
       if (issueType.includes("pothole")) {
         if (severity === "high") return CRITICALITY_MAJOR;
-        if (severity === "low") return CRITICALITY_MINOR;
-        return CRITICALITY_MAJOR;
+        return CRITICALITY_MINOR;  // medium & low potholes are minor
       }
       return CRITICALITY_MAJOR;
     }
@@ -318,7 +317,7 @@ function computeBaselineScore(issues: PingData[]): {
   }
   
   // Hard rules
-  if (totalRecent <= 5 && criticalCount === 0 && highSeverityOpenCount === 0) {
+  if (totalRecent <= 15 && criticalCount === 0 && highSeverityOpenCount === 0) {
     baseline = Math.max(baseline, MIN_SCORE_FEW_MINOR_ISSUES);
   }
   

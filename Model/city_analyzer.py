@@ -97,12 +97,12 @@ RECENCY_MULTIPLIERS = [
 MISSING_TIMESTAMP_MULTIPLIER = 0.6
 
 # Risk-to-score conversion
-RISK_SATURATION_R = 120.0  # Higher = more risk needed to impact score
+RISK_SATURATION_R = 600.0  # Higher = more risk needed to impact score
 HIGH_PRIOR_SCORE = 99      # Starting point for healthy city
 SCORE_RANGE = 98           # Max penalty (99 - 1 = 98)
 
 # Volume penalty threshold
-VOLUME_PENALTY_THRESHOLD = 20
+VOLUME_PENALTY_THRESHOLD = 50
 
 # Hard rule thresholds
 MIN_SCORE_FEW_MINOR_ISSUES = 97
@@ -161,14 +161,12 @@ def classify_criticality(issue: Dict[str, Any]) -> int:
     # Check major keywords
     for keyword in MAJOR_KEYWORDS:
         if keyword in issue_type:
-            # Potholes: severity determines if major or minor
+            # Potholes: only high-severity are MAJOR, otherwise MINOR
             if "pothole" in issue_type:
                 if severity == "high":
                     return CRITICALITY_MAJOR
-                elif severity == "low":
-                    return CRITICALITY_MINOR
                 else:
-                    return CRITICALITY_MAJOR  # Default pothole to major
+                    return CRITICALITY_MINOR  # medium & low potholes are minor
             return CRITICALITY_MAJOR
     
     # Check minor keywords
@@ -400,7 +398,7 @@ class RiskScoringEngine:
         has_high_severity_open = high_severity_open_count > 0
         
         # Rule 1: Few minor issues should score very high
-        if total_recent <= 5 and not has_critical and not has_high_severity_open:
+        if total_recent <= 15 and not has_critical and not has_high_severity_open:
             baseline = max(baseline, MIN_SCORE_FEW_MINOR_ISSUES)
         
         # Rule 2: Critical + high + open must cap score
@@ -971,15 +969,15 @@ def run_self_test():
     print(f"  Actual:   {score3} (risk: {risk3:.1f})")
     print(f"  Result:   {'✓ PASS' if test3_pass else '✗ FAIL'}")
     
-    # Test 4: 5 medium issues, no high severity => should still be high
+    # Test 4: 5 medium potholes (now MINOR), no high severity => should score very high
     test4_issues = [
         {"type": "pothole", "severity": "medium", "status": "new", "created_at": datetime.now(timezone.utc).isoformat()}
         for _ in range(5)
     ]
     score4, rationale4, risk4, *_ = engine.compute_baseline_score(test4_issues)
-    test4_pass = score4 >= 90
-    print(f"\nTest 4: 5 major/medium/open issues (potholes)")
-    print(f"  Expected: >= 90 (small sample, no critical)")
+    test4_pass = score4 >= 95
+    print(f"\nTest 4: 5 minor/medium/open issues (medium potholes)")
+    print(f"  Expected: >= 95 (small sample, all minor, no critical)")
     print(f"  Actual:   {score4} (risk: {risk4:.1f})")
     print(f"  Result:   {'✓ PASS' if test4_pass else '✗ FAIL'}")
     
