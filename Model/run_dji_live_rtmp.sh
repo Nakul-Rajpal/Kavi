@@ -100,6 +100,10 @@ if [ "$RUN_DETECTION" = true ]; then
   fi
   echo "3. Starting Kavi detection on live stream (Ctrl+C to stop)..."
   echo "   Using HLS stream: $HLS_STREAM_URL"
+  echo "   Tickets will be created in Supabase automatically"
+  echo ""
+  echo "   TIP: To set a default location for testing without GPS:"
+  echo "   ./Model/run_dji_live_rtmp.sh --with-detection --default-lat 41.8262 --default-lng -71.4035"
   echo ""
   # Use HLS stream URL instead of RTMP - OpenCV handles HLS much more reliably
   exec python3 -m Model.main "$HLS_STREAM_URL" --live "${EXTRA_ARGS[@]}"

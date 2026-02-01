@@ -5,12 +5,15 @@ Example usage of the complete pipeline
 
 import argparse
 import sys
+import threading
+import queue
 from pathlib import Path
 
 from .sam3_model import SAM3Model
 from .pothole_detector import PotholeDetectionPipeline
 from .results_reporter import ResultsReporter, LocalFileReporter, MultiReporter
 from .config import PipelineConfig
+from .ticket_creator import SmartTicketCreator, TicketCreator
 
 
 def process_video_file(
@@ -135,7 +138,10 @@ def process_live_stream(
     api_endpoint: str = None,
     api_key: str = None,
     confidence: float = 0.5,
-    process_every_n: int = 5
+    process_every_n: int = 5,
+    default_lat: float = None,
+    default_lng: float = None,
+    create_tickets: bool = True
 ):
     """
     Process live video stream
@@ -148,6 +154,9 @@ def process_live_stream(
         api_key: API authentication key
         confidence: Confidence threshold
         process_every_n: Process every Nth frame
+        default_lat: Default latitude for testing without GPS
+        default_lng: Default longitude for testing without GPS
+        create_tickets: Whether to create tickets in Supabase
     """
     print("=" * 60)
     print("Kavi Pothole Detection System - Live Stream with SAM3")
@@ -190,14 +199,108 @@ def process_live_stream(
         api_reporter.start_background_reporting()
         multi_reporter.add_reporter(api_reporter)
 
+    # Initialize ticket creator if enabled
+    ticket_creator = None
+    ticket_queue = None
+    ticket_thread = None
+    submitted_ticket_ids = set()  # Track submitted tickets to prevent duplicates
+    
+    if create_tickets:
+        print("\n3b. Initializing ticket creator...")
+        try:
+            # Use simple TicketCreator for demo (no Gemini analysis needed)
+            ticket_creator = TicketCreator()
+            print("  [TicketCreator] Initialized (demo mode - direct Supabase insert)")
+            
+            # Set up background queue for non-blocking ticket creation
+            ticket_queue = queue.Queue()
+            
+            def ticket_worker():
+                """Background worker to process ticket creation requests"""
+                while True:
+                    try:
+                        item = ticket_queue.get(timeout=1.0)
+                        if item is None:  # Shutdown signal
+                            break
+                        
+                        frame, lat, lng, conf, detection_id = item
+                        try:
+                            # Create ticket for demo
+                            ticket_data = {
+                                "type": "pothole",  # Using pothole type for dashboard compatibility
+                                "severity": "medium",
+                                "confidence": conf,
+                                "status": "new",
+                            }
+                            ticket = ticket_creator.create_ticket(
+                                frame=frame,
+                                lat=lat,
+                                lng=lng,
+                                ticket_data=ticket_data,
+                                filename=f"{detection_id}.jpg"
+                            )
+                            print(f"\n[TICKET CREATED] ID: {ticket['id']}")
+                            print(f"  Type: {ticket.get('type')}")
+                            print(f"  Location: ({lat:.6f}, {lng:.6f})")
+                            print(f"  Confidence: {conf:.3f}")
+                        except Exception as e:
+                            print(f"[TICKET ERROR] Failed to create ticket: {e}")
+                        
+                        ticket_queue.task_done()
+                    except queue.Empty:
+                        continue
+            
+            ticket_thread = threading.Thread(target=ticket_worker, daemon=True)
+            ticket_thread.start()
+            print("  Ticket creation: ENABLED (background processing)")
+            
+            if default_lat and default_lng:
+                print(f"  Default location: ({default_lat}, {default_lng})")
+            else:
+                print("  Location: From telemetry (or will skip if unavailable)")
+                
+        except Exception as e:
+            print(f"  [WARNING] Could not initialize ticket creator: {e}")
+            print("  Ticket creation: DISABLED")
+            ticket_creator = None
+
     # Callback function for detections
     def detection_callback(detections, frame):
-        """Called when potholes are detected"""
-        print(f"[DETECTION] Found {len(detections)} pothole(s) in frame")
+        """Called when items are detected"""
+        print(f"[DETECTION] Found {len(detections)} NEW item(s)")
+        
         for det in detections:
             print(f"  - {det.detection_id}: confidence={det.confidence:.3f}, area={det.area:.0f}")
+            
+            # Create ticket if enabled and not already submitted
+            if ticket_creator and ticket_queue is not None:
+                if det.detection_id in submitted_ticket_ids:
+                    print(f"    [SKIP] Already submitted as ticket")
+                    continue
+                
+                # Get GPS coordinates
+                lat = None
+                lng = None
+                
+                if det.telemetry and det.telemetry.latitude and det.telemetry.longitude:
+                    lat = det.telemetry.latitude
+                    lng = det.telemetry.longitude
+                elif default_lat and default_lng:
+                    lat = default_lat
+                    lng = default_lng
+                
+                if lat and lng:
+                    # Queue ticket creation (non-blocking)
+                    # Convert frame from RGB to BGR for OpenCV
+                    import cv2
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    ticket_queue.put((frame_bgr, lat, lng, det.confidence, det.detection_id))
+                    submitted_ticket_ids.add(det.detection_id)
+                    print(f"    [QUEUED] Ticket creation for ({lat:.6f}, {lng:.6f})")
+                else:
+                    print(f"    [SKIP] No GPS coordinates available")
 
-        # Report to UI
+        # Report to local file reporter
         multi_reporter.report_detections(detections)
 
     # Process live stream
@@ -213,7 +316,15 @@ def process_live_stream(
     except KeyboardInterrupt:
         print("\n\nStopping...")
 
-    # Cleanup
+    # Cleanup ticket queue
+    if ticket_queue is not None:
+        print("Waiting for pending tickets to complete...")
+        ticket_queue.put(None)  # Signal shutdown
+        ticket_queue.join()
+        if ticket_thread:
+            ticket_thread.join(timeout=5.0)
+
+    # Cleanup reporters
     multi_reporter.flush()
     summary = pipeline.get_detections_summary()
     file_reporter.save_summary(summary)
@@ -226,6 +337,7 @@ def process_live_stream(
     print(f"Total raw detections: {summary.get('total_raw_detections', 0)}")
     print(f"Frames with potholes: {summary.get('frames_with_potholes', 0)}")
     print(f"Average confidence: {summary.get('average_confidence', 0.0):.3f}")
+    print(f"Tickets created: {len(submitted_ticket_ids)}")
     print("\nResults saved to:", file_reporter.session_dir)
     print("=" * 60)
 
@@ -300,6 +412,26 @@ def main():
         help='Process live video stream (camera index, RTSP/RTMP URL, or HLS .m3u8 URL). See DJI_AIR_3S_SETUP.md for setup.'
     )
 
+    parser.add_argument(
+        '--default-lat',
+        type=float,
+        default=None,
+        help='Default latitude for live stream when GPS is unavailable (e.g., 41.8262)'
+    )
+
+    parser.add_argument(
+        '--default-lng',
+        type=float,
+        default=None,
+        help='Default longitude for live stream when GPS is unavailable (e.g., -71.4035)'
+    )
+
+    parser.add_argument(
+        '--no-tickets',
+        action='store_true',
+        help='Disable automatic ticket creation in Supabase during live stream'
+    )
+
     args = parser.parse_args()
 
     # Validate inputs: for file mode, source must exist; for live mode, allow URL or camera index
@@ -318,7 +450,10 @@ def main():
             api_endpoint=args.api_endpoint,
             api_key=args.api_key,
             confidence=args.confidence,
-            process_every_n=args.process_every_n
+            process_every_n=args.process_every_n,
+            default_lat=args.default_lat,
+            default_lng=args.default_lng,
+            create_tickets=not args.no_tickets
         )
     else:
         process_video_file(
