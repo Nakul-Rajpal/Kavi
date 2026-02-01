@@ -34,4 +34,9 @@ export interface Ping {
   label?: string
   severity?: string
   confidence?: number
+  // Additional fields for ticket display
+  street_name?: string
+  image_url?: string
+  effort_minutes?: number
+  status?: string
 }

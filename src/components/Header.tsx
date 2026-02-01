@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, Radio, ShieldCheck, Settings, Bell } from "lucide-react";
+import { Clock, Radio, ShieldCheck } from "lucide-react";
 import { motion } from "framer-motion";
 
 interface HeaderProps {
@@ -73,13 +73,6 @@ export default function Header({ isLive, setIsLive, showTimeline, setShowTimelin
             <span className="text-xs font-bold uppercase tracking-wider">Live</span>
           </button>
         </div>
-
-        <button className="w-11 h-11 rounded-xl liquid-glass flex items-center justify-center text-white/50 hover:text-white transition-colors">
-          <Bell size={18} />
-        </button>
-        <button className="w-11 h-11 rounded-xl liquid-glass flex items-center justify-center text-white/50 hover:text-white transition-colors">
-          <Settings size={18} />
-        </button>
       </motion.div>
     </header>
   );

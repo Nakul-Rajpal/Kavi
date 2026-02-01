@@ -1,16 +1,32 @@
 "use client";
 
-import { AlertTriangle, Lightbulb, Droplets, Trash2, AlertCircle, MapPin, LucideIcon } from "lucide-react";
+import { MapPin } from "lucide-react";
 import { Ping } from "@/lib/supabase";
 
-// Icon mapping
-const iconMap: Record<string, LucideIcon> = {
-  pothole: AlertTriangle,
-  light: Lightbulb,
-  flood: Droplets,
-  debris: Trash2,
-  sign: AlertCircle,
-  default: MapPin,
+// Emoji mapping for issue types - consistent with Map.tsx and FilterMenu.tsx
+const emojiMap: Record<string, string> = {
+  pothole: "🕳️",
+  damaged_light: "💡",
+  fallen_tree: "🌳",
+  faded_lines: "🛣️",
+  debris: "🗑️",
+  flood: "💧",
+  sign: "🚧",
+  damaged_sign: "🚧",
+  default: "📍",
+};
+
+// Display names for issue types
+const labelMap: Record<string, string> = {
+  pothole: "Pothole",
+  damaged_light: "Street Light",
+  fallen_tree: "Obstruction",
+  faded_lines: "Faded Markings",
+  debris: "Debris",
+  flood: "Flooding",
+  sign: "Damaged Sign",
+  damaged_sign: "Damaged Sign",
+  default: "Detection",
 };
 
 // Color mapping
@@ -72,10 +88,9 @@ export default function DetectionsSidebar({ pings, connectionStatus = 'connectin
             sortedPings.map((ping) => {
               const type = ping.type || 'default';
               const severity = ping.severity || 'default';
-              const Icon = iconMap[type] || iconMap.default;
+              const emoji = emojiMap[type] || emojiMap.default;
               const color = colorMap[severity] || colorMap.default;
-              const confidence = ping.confidence || Math.floor(Math.random() * 20 + 80);
-              const label = ping.label || type.charAt(0).toUpperCase() + type.slice(1);
+              const label = labelMap[type] || labelMap.default;
 
               return (
                 <div
@@ -84,31 +99,31 @@ export default function DetectionsSidebar({ pings, connectionStatus = 'connectin
                 >
                   <div className="flex items-start gap-4">
                     <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                      className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
                       style={{ 
                         backgroundColor: `${color}15`,
                         boxShadow: `0 0 20px ${color}20`
                       }}
                     >
-                      <Icon size={20} style={{ color }} />
+                      {emoji}
                     </div>
                     
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 mb-1">
                         <span className="font-bold text-white text-sm truncate">{label}</span>
                         <span 
-                          className="text-xs font-black px-2 py-0.5 rounded-full"
+                          className="text-xs font-black px-2 py-0.5 rounded-full uppercase"
                           style={{ 
                             backgroundColor: `${color}20`,
                             color: color
                           }}
                         >
-                          {confidence}%
+                          {severity}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-white/50 truncate">
-                          {ping.lat.toFixed(4)}, {ping.lng.toFixed(4)}
+                          {ping.street_name || `${ping.lat.toFixed(4)}, ${ping.lng.toFixed(4)}`}
                         </span>
                         <span className="text-xs text-white/30">{formatTimestamp(ping.created_at)}</span>
                       </div>

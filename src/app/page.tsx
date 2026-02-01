@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect } from "react";
 import Header from "@/components/Header";
 import GlassPanel from "@/components/GlassPanel";
 import Timeline from "@/components/Timeline";
-import FilterMenu from "@/components/FilterMenu";
+import FilterMenu, { IssueTypeId } from "@/components/FilterMenu";
 import DetectionsSidebar from "@/components/DetectionsSidebar";
 import { AnimatePresence } from "framer-motion";
 import { Ping } from "@/lib/supabase";
@@ -26,7 +26,7 @@ const Map = dynamic(() => import("@/components/Map"), {
 export default function Dashboard() {
   const [isLive, setIsLive] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
-  const [currentTime, setCurrentTime] = useState("12:00 PM");
+  const [timeRange, setTimeRange] = useState("all"); // Time range filter: 1h, 6h, 12h, 24h, 7d, all
   const [pings, setPings] = useState<Ping[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [liveStreamUrl, setLiveStreamUrl] = useState<string | null>(null);
@@ -39,6 +39,7 @@ export default function Dashboard() {
       .then((data) => setLiveStreamUrl(data.streamUrl ?? null))
       .catch(() => setLiveStreamUrl(null));
   }, [isLive]);
+  const [activeFilters, setActiveFilters] = useState<Set<IssueTypeId>>(new Set());
 
   const handlePingsUpdate = useCallback((data: { count: number; latest: Ping | null; pings: Ping[] }) => {
     setPings(data.pings);
@@ -47,14 +48,23 @@ export default function Dashboard() {
     }
   }, []);
 
+  const handleFilterChange = useCallback((filters: Set<IssueTypeId>) => {
+    setActiveFilters(filters);
+  }, []);
+
+  const handleTimeRangeChange = useCallback((range: string) => {
+    setTimeRange(range);
+  }, []);
+
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[#0d1117]">
       {/* Map Layer */}
       <div className="absolute inset-0 z-0">
         <Map 
           isLive={isLive} 
-          currentTime={currentTime} 
+          timeRange={timeRange}
           onPingsUpdate={handlePingsUpdate}
+          activeFilters={activeFilters}
         />
       </div>
 
@@ -84,13 +94,16 @@ export default function Dashboard() {
         <AnimatePresence>
           {showTimeline && (
             <Timeline 
-              currentTime={currentTime} 
-              setCurrentTime={setCurrentTime} 
+              timeRange={timeRange}
+              onTimeRangeChange={handleTimeRangeChange}
             />
           )}
         </AnimatePresence>
 
-        <FilterMenu />
+        <FilterMenu 
+          activeFilters={activeFilters}
+          onFilterChange={handleFilterChange}
+        />
       </div>
     </main>
   );
